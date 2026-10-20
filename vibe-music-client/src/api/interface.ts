@@ -32,7 +32,7 @@ export interface PlaylistDetail {
 
 // 导出 Song 类型
 export interface Song {
-    songId: number
+    songId: number | string
     songName: string
     artistName: string
     album: string
@@ -41,6 +41,9 @@ export interface Song {
     audioUrl: string
     likeStatus: number
     releaseTime: string
+    source?: string
+    sourceName?: string
+    online?: boolean
 }
 
 export interface PlaylistComment {

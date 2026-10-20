@@ -61,6 +61,7 @@ public class LoginInterceptor implements HandlerInterceptor {
                 PathConstant.ARTIST_DETAIL_PATH,
                 PathConstant.SONG_LIST_PATH,
                 PathConstant.SONG_DETAIL_PATH,
+                PathConstant.SONG_ONLINE_SEARCH_PATH,
                 PathConstant.AGENT_PATH
         );
 

@@ -92,3 +92,9 @@ minio:
   accessKey: ${vibe-music.minio.accessKey} # 修改你的 MinIO Access Key
   secretKey: ${vibe-music.minio.secretKey} # 修改你的 MinIO Secret Key
   bucket: ${vibe-music.minio.bucket} # 确认 Bucket 名称与你创建的一致
+
+# 在线多音源侧车服务（vibe-music-provider）
+vibe-music:
+  online:
+    provider-url: ${VIBE_MUSIC_PROVIDER_URL:http://127.0.0.1:3001}
+    provider-public-url: ${VIBE_MUSIC_PROVIDER_PUBLIC_URL:http://127.0.0.1:3001}

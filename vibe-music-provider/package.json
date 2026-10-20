@@ -1,0 +1,17 @@
+{
+  "name": "vibe-music-provider",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Multi-source music search sidecar for Vibe Music",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node --watch server.mjs"
+  },
+  "dependencies": {
+    "@meting/core": "1.6.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

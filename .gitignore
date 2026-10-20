@@ -5,3 +5,7 @@ others
 **/src/test
 *.drawio
 .zcode
+.runtime/
+vibe-music-backend/vibe-music-server/src/main/resources/application-dev.yml
+vibe-music-client/.env.development.local
+vibe-music-provider/node_modules/

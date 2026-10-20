@@ -63,10 +63,10 @@ const handlePlay = async (row: Song) => {
 }
 
 // 更新所有相同歌曲的喜欢状态
-const updateAllSongLikeStatus = (songId: number, status: number) => {
+const updateAllSongLikeStatus = (songId: number | string, status: number) => {
   // 更新播放列表中的状态
   audio.trackList.forEach(track => {
-    if (Number(track.id) === songId) {
+    if (track.id === songId.toString()) {
       track.likeStatus = status
     }
   })
@@ -92,6 +92,11 @@ const updateAllSongLikeStatus = (songId: number, status: number) => {
 // 处理喜欢/取消喜欢
 const handleLike = async (row: Song, e: Event) => {
   e.stopPropagation() // 阻止事件冒泡
+
+  if (row.online) {
+    ElMessage.info('在线歌曲暂不支持收藏，请先下载或导入本地曲库')
+    return
+  }
   
   if (!userStore.isLoggedIn) {
     ElMessage.warning('请先登录')
@@ -101,7 +106,7 @@ const handleLike = async (row: Song, e: Event) => {
   try {
     if (row.likeStatus === 0) {
       // 收藏歌曲
-      const res = await collectSong(row.songId)
+      const res = await collectSong(Number(row.songId))
       if (res.code === 0) {
         updateAllSongLikeStatus(row.songId, 1)
         ElMessage.success('已添加到我的喜欢')
@@ -110,7 +115,7 @@ const handleLike = async (row: Song, e: Event) => {
       }
     } else {
       // 取消收藏
-      const res = await cancelCollectSong(row.songId)
+      const res = await cancelCollectSong(Number(row.songId))
       if (res.code === 0) {
         updateAllSongLikeStatus(row.songId, 0)
         ElMessage.success('已取消喜欢')
@@ -134,9 +139,9 @@ const downLoadMusic = (row: Song, e: Event) => {
 }
 
 // 判断是否是当前播放的歌曲
-const isCurrentPlaying = (songId: number) => {
+const isCurrentPlaying = (songId: number | string) => {
   const currentTrack = audio.trackList[audio.currentSongIndex]
-  return currentTrack && Number(currentTrack.id) === songId
+  return currentTrack && currentTrack.id === songId.toString()
 }
 </script>
 
@@ -180,7 +185,12 @@ const isCurrentPlaying = (songId: number) => {
 
           <!-- 歌曲名称 -->
           <div class="text-left">
-            <div class="flex-1 line-clamp-1">{{ row.songName }}</div>
+            <div class="flex items-center gap-2">
+              <span class="flex-1 line-clamp-1">{{ row.songName }}</span>
+              <span v-if="row.online" class="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary whitespace-nowrap">
+                {{ row.sourceName }}
+              </span>
+            </div>
           </div>
 
           <!-- 歌手 -->

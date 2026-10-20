@@ -94,6 +94,14 @@ export const getAllSongs = (data: object) => {
   return http<ResultTable>('post', '/song/getAllSongs', { data })
 }
 
+/** 聚合搜索在线曲库 */
+export const searchOnlineSongs = (keyword: string, sources?: string[]) => {
+  return http<Result>('get', '/song/searchOnline', {
+    params: { keyword, sources, limit: 5 },
+    paramsSerializer: { indexes: null },
+  })
+}
+
 /** 获取歌曲详情 */
 export const getSongDetail = (id: number) => {
   return http<ResultTable>('get', `/song/getSongDetail/${id}`)
