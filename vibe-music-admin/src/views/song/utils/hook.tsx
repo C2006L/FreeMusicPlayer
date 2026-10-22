@@ -322,11 +322,12 @@ export function useSong(tableRef: Ref, treeRef: Ref) {
           if (valid) {
             console.log("curData", curData);
             // 表单规则校验通过
+            const requestData = {
+              ...curData,
+              style: Array.isArray(curData.style) ? curData.style.join(",") : ""
+            };
             if (title === "新增") {
-              curData.style = Array.isArray(curData.style)
-                ? curData.style.join(",")
-                : "";
-              addSong(curData).then(res => {
+              addSong(requestData).then(res => {
                 if (res.code === 0) {
                   chores();
                 } else {
@@ -334,10 +335,7 @@ export function useSong(tableRef: Ref, treeRef: Ref) {
                 }
               });
             } else {
-              curData.style = Array.isArray(curData.style)
-                ? curData.style.join(",")
-                : "";
-              updateSong(curData).then(res => {
+              updateSong(requestData).then(res => {
                 if (res.code === 0) {
                   chores();
                 } else {

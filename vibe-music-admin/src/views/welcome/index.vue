@@ -61,7 +61,21 @@ const pieChartData2 = ref([
 </script>
 
 <template>
-  <div>
+  <div class="console-dashboard">
+    <header class="dashboard-heading">
+      <div>
+        <p class="dashboard-kicker">LIBRARY OVERVIEW</p>
+        <h1>内容控制台</h1>
+        <p class="dashboard-description">
+          查看 FreeMusicPlayer
+          当前曲库与用户数据，并从左侧导航进入具体管理任务。
+        </p>
+      </div>
+      <div class="dashboard-context" aria-label="控制台范围">
+        <span>用户</span><span>音乐内容</span><span>运营反馈</span>
+      </div>
+    </header>
+    <div class="section-label">关键数据</div>
     <el-row :gutter="24" justify="space-around">
       <re-col
         v-motion
@@ -95,7 +109,7 @@ const pieChartData2 = ref([
             >
               <IconifyIconOffline
                 :icon="GroupLine"
-                :color="'#41b6ff'"
+                :color="'#ef6f52'"
                 width="18"
               />
             </div>
@@ -111,7 +125,7 @@ const pieChartData2 = ref([
             </div>
             <ChartLine
               class="!w-1/2"
-              :color="'#41b6ff'"
+              :color="'#ef6f52'"
               :data="[210, 439, 530, 496, 575, 680, 845]"
             />
           </div>
@@ -150,7 +164,7 @@ const pieChartData2 = ref([
             >
               <IconifyIconOffline
                 :icon="Artist"
-                :color="'#e85f33'"
+                :color="'#e7a36e'"
                 width="18"
               />
             </div>
@@ -166,7 +180,7 @@ const pieChartData2 = ref([
             </div>
             <ChartLine
               class="!w-1/2"
-              :color="'#e85f33'"
+              :color="'#e7a36e'"
               :data="[210, 399, 500, 492, 652, 688, 850]"
             />
           </div>
@@ -203,7 +217,7 @@ const pieChartData2 = ref([
                 backgroundColor: isDark ? 'transparent' : '#eff8f4'
               }"
             >
-              <IconifyIconOffline :icon="Music" :color="'#26ce83'" width="18" />
+              <IconifyIconOffline :icon="Music" :color="'#d8c0ae'" width="18" />
             </div>
           </div>
           <div class="flex justify-between items-start mt-3">
@@ -217,7 +231,7 @@ const pieChartData2 = ref([
             </div>
             <ChartLine
               class="!w-1/2"
-              :color="'#26ce83'"
+              :color="'#d8c0ae'"
               :data="[2101, 3399, 5300, 4962, 6952, 6808, 8450]"
             />
           </div>
@@ -254,7 +268,7 @@ const pieChartData2 = ref([
                 backgroundColor: isDark ? 'transparent' : '#f6f4fe'
               }"
             >
-              <IconifyIconOffline :icon="Album" :color="'#7846e5'" width="18" />
+              <IconifyIconOffline :icon="Album" :color="'#9d7d6c'" width="18" />
             </div>
           </div>
           <div class="flex justify-between items-start mt-3">
@@ -268,7 +282,7 @@ const pieChartData2 = ref([
             </div>
             <ChartLine
               class="!w-1/2"
-              :color="'#7846e5'"
+              :color="'#9d7d6c'"
               :data="[2101, 5288, 4239, 4962, 6752, 5208, 7450]"
             />
           </div>
@@ -379,7 +393,75 @@ const pieChartData2 = ref([
   margin: 20px 20px 0 !important;
 }
 
+.console-dashboard {
+  max-width: 1500px;
+  margin: 0 auto;
+}
+
+.dashboard-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 32px;
+  padding: 14px 2px 32px;
+  margin-bottom: 22px;
+  border-bottom: 1px solid var(--fmp-border);
+}
+
+.dashboard-kicker,
+.section-label {
+  color: var(--fmp-accent);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.18em;
+}
+
+.dashboard-heading h1 {
+  margin: 5px 0 8px;
+  color: var(--fmp-text);
+  font-family: "Noto Serif SC", "Songti SC", serif;
+  font-size: 34px;
+  font-weight: 650;
+  letter-spacing: -0.04em;
+}
+
+.dashboard-description {
+  margin: 0;
+  color: var(--fmp-text-muted);
+  font-size: 14px;
+}
+
+.dashboard-context {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.dashboard-context span {
+  padding: 6px 10px;
+  color: var(--fmp-text-muted);
+  font-size: 12px;
+  border: 1px solid var(--fmp-border);
+  border-radius: 999px;
+}
+
+.section-label {
+  margin: 0 0 12px 2px;
+}
+
 .bar-position {
   margin-top: 18px;
+}
+
+@media (width <= 760px) {
+  .dashboard-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .dashboard-context {
+    justify-content: flex-start;
+  }
 }
 </style>

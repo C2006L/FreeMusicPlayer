@@ -8,10 +8,8 @@ const TITLE = getConfig("Title");
   <footer
     class="layout-footer text-[rgba(0,0,0,0.6)] dark:text-[rgba(220,220,242,0.8)]"
   >
-    Copyright © 2024-2025
-    <a class="hover:text-primary" href="#" target="_blank">
-      &emsp;{{ TITLE }}
-    </a>
+    <span>FreeMusicPlayer · 本地音乐管理控制台</span>
+    <span class="footer-title">{{ TITLE }}</span>
   </footer>
 </template>
 
@@ -23,5 +21,10 @@ const TITLE = getConfig("Title");
   width: 100%;
   padding: 0 0 8px;
   font-size: 14px;
+}
+
+.footer-title {
+  margin-left: 12px;
+  color: var(--fmp-accent);
 }
 </style>

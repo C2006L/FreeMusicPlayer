@@ -1,18 +1,15 @@
 {
   "$schema": "https://json.schemastore.org/jsconfig",
-  "name": "vibe-music-admin",
+  "name": "free-music-player-admin",
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Vibe Music",
-  "author": {
-    "name": "Alex LiSun",
-    "email": "vibe_music_service@163.com"
-  },
+  "description": "FreeMusicPlayer administration console",
+  "author": "FreeMusicPlayer Contributors",
   "scripts": {
-    "dev": "NODE_OPTIONS=--max-old-space-size=4096 vite",
+    "dev": "vite",
     "serve": "pnpm dev",
-    "build": "rimraf dist && NODE_OPTIONS=--max-old-space-size=8192 vite build",
+    "build": "rimraf dist && vite build",
     "build:staging": "rimraf dist && vite build --mode staging",
     "report": "rimraf dist && vite build",
     "preview": "vite preview",
@@ -27,7 +24,7 @@
     "preinstall": "npx only-allow pnpm"
   },
   "keywords": [
-    "pure-admin-thin",
+    "freemusicplayer",
     "vue-pure-admin",
     "element-plus",
     "tailwindcss",
