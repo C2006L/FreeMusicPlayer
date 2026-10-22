@@ -20,6 +20,14 @@ New-Item -ItemType Directory -Force -Path (Join-Path $runtimeRoot 'go-music-api'
 $goMusicCookies = Join-Path $runtimeRoot 'go-music-api\cookies.json'
 if (-not (Test-Path $goMusicCookies)) { Set-Content -Path $goMusicCookies -Value '{}' -Encoding utf8 }
 
+$jwtSecretFile = Join-Path $runtimeRoot 'jwt-secret.txt'
+if (-not (Test-Path $jwtSecretFile)) {
+    $secretBytes = New-Object byte[] 48
+    [System.Security.Cryptography.RandomNumberGenerator]::Fill($secretBytes)
+    [System.IO.File]::WriteAllText($jwtSecretFile, [Convert]::ToBase64String($secretBytes))
+}
+$env:VIBE_MUSIC_JWT_SECRET = ([System.IO.File]::ReadAllText($jwtSecretFile)).Trim()
+
 Write-Host 'Installing provider dependencies on D: ...'
 Push-Location (Join-Path $projectRoot 'vibe-music-provider')
 try {

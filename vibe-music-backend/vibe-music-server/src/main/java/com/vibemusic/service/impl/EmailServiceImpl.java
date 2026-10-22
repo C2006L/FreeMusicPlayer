@@ -62,8 +62,9 @@ public class EmailServiceImpl implements EmailService {
      */
     public String sendVerificationCodeEmail(String email) {
         String verificationCode = RandomCodeUtil.generateRandomCode();
-        String subject = "【Vibe Music】验证码";
-        String content = "您的验证码为：" + verificationCode;
+        String subject = "【FreeMusicPlayer】验证码";
+        String content = "您正在验证 FreeMusicPlayer 账号，验证码为：" + verificationCode
+                + "。验证码 5 分钟内有效，请勿转发给他人。";
         boolean success = sendEmail(email, subject, content);
         if (success) {
             return verificationCode;

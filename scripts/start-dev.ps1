@@ -14,6 +14,15 @@ New-Item -ItemType Directory -Force -Path $goMusicRuntime | Out-Null
 $goMusicCookies = Join-Path $goMusicRuntime 'cookies.json'
 if (-not (Test-Path $goMusicCookies)) { Set-Content -Path $goMusicCookies -Value '{}' -Encoding utf8 }
 
+# Keep the development JWT secret outside source control and stable across restarts.
+$jwtSecretFile = Join-Path $runtimeRoot 'jwt-secret.txt'
+if (-not (Test-Path $jwtSecretFile)) {
+    $secretBytes = New-Object byte[] 48
+    [System.Security.Cryptography.RandomNumberGenerator]::Fill($secretBytes)
+    [System.IO.File]::WriteAllText($jwtSecretFile, [Convert]::ToBase64String($secretBytes))
+}
+$env:VIBE_MUSIC_JWT_SECRET = ([System.IO.File]::ReadAllText($jwtSecretFile)).Trim()
+
 function Wait-Port([int]$Port, [int]$TimeoutSeconds = 120) {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {

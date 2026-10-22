@@ -9,14 +9,15 @@ import com.vibemusic.model.entity.Admin;
 import com.vibemusic.result.Result;
 import com.vibemusic.service.IAdminService;
 import com.vibemusic.util.JwtUtil;
+import com.vibemusic.util.PasswordUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.util.DigestUtils;
 
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -30,6 +31,8 @@ import java.util.concurrent.TimeUnit;
  */
 @Service
 public class AdminServiceImpl extends ServiceImpl<AdminMapper, Admin> implements IAdminService {
+
+    private static final int MAX_LOGIN_FAILURES = 5;
 
     @Autowired
     private AdminMapper adminMapper;
@@ -49,9 +52,8 @@ public class AdminServiceImpl extends ServiceImpl<AdminMapper, Admin> implements
             return Result.error(MessageConstant.USERNAME + MessageConstant.ALREADY_EXISTS);
         }
 
-        String passwordMD5 = DigestUtils.md5DigestAsHex(adminDTO.getPassword().getBytes());
         Admin adminRegister = new Admin();
-        adminRegister.setUsername(adminDTO.getUsername()).setPassword(passwordMD5);
+        adminRegister.setUsername(adminDTO.getUsername()).setPassword(PasswordUtil.encode(adminDTO.getPassword()));
 
         if (adminMapper.insert(adminRegister) == 0) {
             return Result.error(MessageConstant.REGISTER + MessageConstant.FAILED);
@@ -67,12 +69,24 @@ public class AdminServiceImpl extends ServiceImpl<AdminMapper, Admin> implements
      */
     @Override
     public Result login(AdminDTO adminDTO) {
+        String failureKey = "rate:admin:login:failed:" + adminDTO.getUsername().toLowerCase(Locale.ROOT);
+        String failureCount = stringRedisTemplate.opsForValue().get(failureKey);
+        if (failureCount != null && Integer.parseInt(failureCount) >= MAX_LOGIN_FAILURES) {
+            return Result.error(MessageConstant.LOGIN_TOO_FREQUENT);
+        }
+
         Admin admin = adminMapper.selectOne(new QueryWrapper<Admin>().eq("username", adminDTO.getUsername()));
         if (admin == null) {
+            recordLoginFailure(failureKey);
             return Result.error(MessageConstant.USERNAME + MessageConstant.ERROR);
         }
 
-        if (DigestUtils.md5DigestAsHex(adminDTO.getPassword().getBytes()).equals(admin.getPassword())) {
+        if (PasswordUtil.matches(adminDTO.getPassword(), admin.getPassword())) {
+            stringRedisTemplate.delete(failureKey);
+            if (PasswordUtil.isLegacyMd5(admin.getPassword())) {
+                adminMapper.update(new Admin().setPassword(PasswordUtil.encode(adminDTO.getPassword())),
+                        new QueryWrapper<Admin>().eq("id", admin.getAdminId()));
+            }
             // 登录成功
             Map<String, Object> claims = new HashMap<>();
             claims.put(JwtClaimsConstant.ROLE, RoleEnum.ADMIN.getRole());
@@ -86,7 +100,15 @@ public class AdminServiceImpl extends ServiceImpl<AdminMapper, Admin> implements
             return Result.success(MessageConstant.LOGIN + MessageConstant.SUCCESS, token);
         }
 
+        recordLoginFailure(failureKey);
         return Result.error(MessageConstant.PASSWORD + MessageConstant.ERROR);
+    }
+
+    private void recordLoginFailure(String failureKey) {
+        Long failures = stringRedisTemplate.opsForValue().increment(failureKey);
+        if (failures != null && failures == 1) {
+            stringRedisTemplate.expire(failureKey, 15, TimeUnit.MINUTES);
+        }
     }
 
     /**
@@ -97,6 +119,9 @@ public class AdminServiceImpl extends ServiceImpl<AdminMapper, Admin> implements
      */
     @Override
     public Result logout(String token) {
+        if (token != null && token.startsWith("Bearer ")) {
+            token = token.substring(7);
+        }
         // 注销token
         Boolean result = stringRedisTemplate.delete(token);
         if (result != null && result) {

@@ -104,5 +104,7 @@ export const UserStore = defineStore('UserStore', {
       }
     }
   },
-  persist: piniaPersistConfig('UserStore'),
+  // Keep credentials for the current browser session only. Other preferences
+  // continue to use localStorage through the shared persistence helper.
+  persist: piniaPersistConfig('UserStore', sessionStorage),
 })

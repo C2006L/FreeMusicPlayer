@@ -1,5 +1,6 @@
 package com.vibemusic.config;
 
+import com.vibemusic.interceptor.AuthRateLimitInterceptor;
 import com.vibemusic.interceptor.LoginInterceptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Configuration;
@@ -11,9 +12,15 @@ public class WebConfig implements WebMvcConfigurer {
 
     @Autowired
     private LoginInterceptor loginInterceptor;
+    @Autowired
+    private AuthRateLimitInterceptor authRateLimitInterceptor;
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
+        registry.addInterceptor(authRateLimitInterceptor)
+                .addPathPatterns("/user/login", "/admin/login", "/user/sendVerificationCode")
+                .order(0);
+
         // 登录接口和注册接口不拦截
         registry.addInterceptor(loginInterceptor)
                 .addPathPatterns("/**") // 拦截所有请求
@@ -27,6 +34,7 @@ public class WebConfig implements WebMvcConfigurer {
                         "/artist/getAllArtists", "/artist/getArtistDetail/**",
                         "/song/getAllSongs", "/song/getRecommendedSongs", "/song/getSongDetail/**",
                         "/song/searchOnline", "/song/discoverOnline",
-                        "/song/streamOnline", "/song/coverOnline", "/song/lyricOnline");
+                        "/song/streamOnline", "/song/coverOnline", "/song/lyricOnline")
+                .order(1);
     }
 }

@@ -40,8 +40,7 @@ instance.interceptors.request.use(
       if (!config.headers) {
         config.headers = {} as AxiosRequestHeaders
       }
-      // 添加Bearer前缀
-      config.headers.Authorization = token
+      config.headers.Authorization = `Bearer ${token}`
     }
 
     // console.log('请求URL:', config.url)
@@ -83,6 +82,9 @@ instance.interceptors.response.use(
           break
         case 404:
           ElMessage.error('请求的资源不存在')
+          break
+        case 429:
+          ElMessage.error(error.response.data?.message || '请求过于频繁，请稍后再试')
           break
         case 500:
           ElMessage.error('服务器错误')

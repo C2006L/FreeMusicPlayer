@@ -24,3 +24,6 @@ vibe-music:
   online:
     provider-url: http://127.0.0.1:3001
     provider-public-url: http://127.0.0.1:8080/song
+
+# Set this environment variable before starting the backend. Use at least 32 random characters.
+# VIBE_MUSIC_JWT_SECRET=replace-with-a-long-random-secret

@@ -20,6 +20,7 @@ import com.vibemusic.service.EmailService;
 import com.vibemusic.service.IUserService;
 import com.vibemusic.service.MinioService;
 import com.vibemusic.util.JwtUtil;
+import com.vibemusic.util.PasswordUtil;
 import com.vibemusic.util.ThreadLocalUtil;
 import com.vibemusic.util.TypeConversionUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
@@ -35,11 +36,11 @@ import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.DigestUtils;
 
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -54,6 +55,10 @@ import java.util.concurrent.TimeUnit;
 @Service
 @CacheConfig(cacheNames = "userCache")
 public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IUserService {
+
+    private static final int MAX_LOGIN_FAILURES = 5;
+    private static final long LOGIN_FAILURE_WINDOW_MINUTES = 15;
+    private static final long VERIFICATION_CODE_COOLDOWN_SECONDS = 60;
 
     @Autowired
     private UserMapper userMapper;
@@ -76,13 +81,22 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
      */
     @Override
     public Result sendVerificationCode(String email) {
-        String verificationCode = emailService.sendVerificationCodeEmail(email);
+        String normalizedEmail = email.trim().toLowerCase(Locale.ROOT);
+        String cooldownKey = "rate:verification:" + normalizedEmail;
+        Boolean allowed = stringRedisTemplate.opsForValue().setIfAbsent(
+                cooldownKey, "1", VERIFICATION_CODE_COOLDOWN_SECONDS, TimeUnit.SECONDS);
+        if (!Boolean.TRUE.equals(allowed)) {
+            return Result.error(MessageConstant.VERIFICATION_CODE_TOO_FREQUENT);
+        }
+
+        String verificationCode = emailService.sendVerificationCodeEmail(normalizedEmail);
         if (verificationCode == null) {
+            stringRedisTemplate.delete(cooldownKey);
             return Result.error(MessageConstant.EMAIL_SEND_FAILED);
         }
 
         // 将验证码存储到Redis中，设置过期时间为5分钟
-        stringRedisTemplate.opsForValue().set("verificationCode:" + email, verificationCode, 5, TimeUnit.MINUTES);
+        stringRedisTemplate.opsForValue().set("verificationCode:" + normalizedEmail, verificationCode, 5, TimeUnit.MINUTES);
         return Result.success(MessageConstant.EMAIL_SEND_SUCCESS);
     }
 
@@ -95,7 +109,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
      */
     @Override
     public boolean verifyVerificationCode(String email, String verificationCode) {
-        String storedCode = stringRedisTemplate.opsForValue().get("verificationCode:" + email);
+        String storedCode = stringRedisTemplate.opsForValue().get("verificationCode:" + email.trim().toLowerCase(Locale.ROOT));
         return storedCode != null && storedCode.equals(verificationCode);
     }
 
@@ -108,22 +122,22 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     @Override
     @CacheEvict(cacheNames = "userCache", allEntries = true)
     public Result register(UserRegisterDTO userRegisterDTO) {
+        String normalizedEmail = userRegisterDTO.getEmail().trim().toLowerCase(Locale.ROOT);
         // 删除Redis中的验证码
-        stringRedisTemplate.delete("verificationCode:" + userRegisterDTO.getEmail());
+        stringRedisTemplate.delete("verificationCode:" + normalizedEmail);
 
         User userByUsername = userMapper.selectOne(new QueryWrapper<User>().eq("username", userRegisterDTO.getUsername()));
         if (userByUsername != null) {
             return Result.error(MessageConstant.USERNAME + MessageConstant.ALREADY_EXISTS);
         }
 
-        User userByEmail = userMapper.selectOne(new QueryWrapper<User>().eq("email", userRegisterDTO.getEmail()));
+        User userByEmail = userMapper.selectOne(new QueryWrapper<User>().eq("email", normalizedEmail));
         if (userByEmail != null) {
             return Result.error(MessageConstant.EMAIL + MessageConstant.ALREADY_EXISTS);
         }
 
-        String passwordMD5 = DigestUtils.md5DigestAsHex(userRegisterDTO.getPassword().getBytes());
         User user = new User();
-        user.setUsername(userRegisterDTO.getUsername()).setPassword(passwordMD5).setEmail(userRegisterDTO.getEmail())
+        user.setUsername(userRegisterDTO.getUsername()).setPassword(PasswordUtil.encode(userRegisterDTO.getPassword())).setEmail(normalizedEmail)
                 .setCreateTime(LocalDateTime.now()).setUpdateTime(LocalDateTime.now())
                 .setUserStatus(UserStatusEnum.ENABLE);
 
@@ -141,15 +155,33 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
      */
     @Override
     public Result login(UserLoginDTO userLoginDTO) {
-        User user = userMapper.selectOne(new QueryWrapper<User>().eq("email", userLoginDTO.getEmail()));
+        String normalizedEmail = userLoginDTO.getEmail().trim().toLowerCase(Locale.ROOT);
+        String failureKey = "rate:login:failed:" + normalizedEmail;
+        String failureCount = stringRedisTemplate.opsForValue().get(failureKey);
+        if (failureCount != null && Integer.parseInt(failureCount) >= MAX_LOGIN_FAILURES) {
+            return Result.error(MessageConstant.LOGIN_TOO_FREQUENT);
+        }
+
+        User user = userMapper.selectOne(new QueryWrapper<User>().eq("email", normalizedEmail));
         if (user == null) {
+            recordLoginFailure(failureKey);
             return Result.error(MessageConstant.EMAIL + MessageConstant.ERROR);
         }
         if (user.getUserStatus() != UserStatusEnum.ENABLE) {
             return Result.error(MessageConstant.ACCOUNT_LOCKED);
         }
 
-        if (DigestUtils.md5DigestAsHex(userLoginDTO.getPassword().getBytes()).equals(user.getPassword())) {
+        if (PasswordUtil.matches(userLoginDTO.getPassword(), user.getPassword())) {
+            stringRedisTemplate.delete(failureKey);
+
+            // Transparently migrate legacy MD5 hashes after the password has been verified.
+            if (PasswordUtil.isLegacyMd5(user.getPassword())) {
+                userMapper.update(new User()
+                                .setPassword(PasswordUtil.encode(userLoginDTO.getPassword()))
+                                .setUpdateTime(LocalDateTime.now()),
+                        new QueryWrapper<User>().eq("id", user.getUserId()));
+            }
+
             // 登录成功
             Map<String, Object> claims = new HashMap<>();
             claims.put(JwtClaimsConstant.ROLE, RoleEnum.USER.getRole());
@@ -164,7 +196,15 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             return Result.success(MessageConstant.LOGIN + MessageConstant.SUCCESS, token);
         }
 
+        recordLoginFailure(failureKey);
         return Result.error(MessageConstant.PASSWORD + MessageConstant.ERROR);
+    }
+
+    private void recordLoginFailure(String failureKey) {
+        Long failures = stringRedisTemplate.opsForValue().increment(failureKey);
+        if (failures != null && failures == 1) {
+            stringRedisTemplate.expire(failureKey, LOGIN_FAILURE_WINDOW_MINUTES, TimeUnit.MINUTES);
+        }
     }
 
     /**
@@ -261,11 +301,11 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         Object userIdObj = map.get(JwtClaimsConstant.USER_ID);
         Long userId = TypeConversionUtil.toLong(userIdObj);
         User user = userMapper.selectById(userId);
-        if (!user.getPassword().equals(DigestUtils.md5DigestAsHex(userPasswordDTO.getOldPassword().getBytes()))) {
+        if (!PasswordUtil.matches(userPasswordDTO.getOldPassword(), user.getPassword())) {
             return Result.error(MessageConstant.OLD_PASSWORD_ERROR);
         }
 
-        if (user.getPassword().equals(DigestUtils.md5DigestAsHex(userPasswordDTO.getNewPassword().getBytes()))) {
+        if (PasswordUtil.matches(userPasswordDTO.getNewPassword(), user.getPassword())) {
             return Result.error(MessageConstant.NEW_PASSWORD_ERROR);
         }
 
@@ -273,7 +313,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             return Result.error(MessageConstant.PASSWORD_NOT_MATCH);
         }
 
-        if (userMapper.update(new User().setPassword(DigestUtils.md5DigestAsHex(userPasswordDTO.getNewPassword().getBytes())).setUpdateTime(LocalDateTime.now()),
+        if (userMapper.update(new User().setPassword(PasswordUtil.encode(userPasswordDTO.getNewPassword())).setUpdateTime(LocalDateTime.now()),
                 new QueryWrapper<User>().eq("id", userId)) == 0) {
             return Result.error(MessageConstant.UPDATE + MessageConstant.FAILED);
         }
@@ -304,7 +344,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             return Result.error(MessageConstant.PASSWORD_NOT_MATCH);
         }
 
-        if (userMapper.update(new User().setPassword(DigestUtils.md5DigestAsHex(userResetPasswordDTO.getNewPassword().getBytes())).setUpdateTime(LocalDateTime.now()),
+        if (userMapper.update(new User().setPassword(PasswordUtil.encode(userResetPasswordDTO.getNewPassword())).setUpdateTime(LocalDateTime.now()),
                 new QueryWrapper<User>().eq("id", user.getUserId())) == 0) {
             return Result.error(MessageConstant.PASSWORD + MessageConstant.RESET + MessageConstant.FAILED);
         }
@@ -321,6 +361,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     @Override
     @CacheEvict(cacheNames = {"userCache", "userFavoriteCache", "songCache", "artistCache", "playlistCache"}, allEntries = true)
     public Result logout(String token) {
+        token = stripBearerPrefix(token);
         // 注销token
         Boolean result = stringRedisTemplate.delete(token);
         if (result != null && result) {
@@ -328,6 +369,10 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         } else {
             return Result.error(MessageConstant.LOGOUT + MessageConstant.FAILED);
         }
+    }
+
+    private String stripBearerPrefix(String token) {
+        return token != null && token.startsWith("Bearer ") ? token.substring(7) : token;
     }
 
     /**
@@ -451,9 +496,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             }
         }
 
-        String passwordMD5 = DigestUtils.md5DigestAsHex(userAddDTO.getPassword().getBytes());
         User user = new User();
-        user.setUsername(userAddDTO.getUsername()).setPassword(passwordMD5).setPhone(userAddDTO.getPhone())
+        user.setUsername(userAddDTO.getUsername()).setPassword(PasswordUtil.encode(userAddDTO.getPassword())).setPhone(userAddDTO.getPhone())
                 .setEmail(userAddDTO.getEmail()).setIntroduction(userAddDTO.getIntroduction())
                 .setCreateTime(LocalDateTime.now()).setUpdateTime(LocalDateTime.now());
 

@@ -2,7 +2,6 @@
 others
 
 ### Test ###
-**/src/test
 *.drawio
 .zcode
 .runtime/

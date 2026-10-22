@@ -59,6 +59,12 @@ spring:
     dashscope:
       api-key: ${vibe-music.ai.dashscope.api-key}
 
+security:
+  jwt:
+    # Production must provide a strong, private value through VIBE_MUSIC_JWT_SECRET.
+    secret: ${VIBE_MUSIC_JWT_SECRET}
+    expiration-millis: 21600000
+
 # 配置 mybatis-plus
 mybatis-plus:
   type-aliases-package: cn.edu.seig.pojo # 实体类所在的包，允许用实体类类名作为别名

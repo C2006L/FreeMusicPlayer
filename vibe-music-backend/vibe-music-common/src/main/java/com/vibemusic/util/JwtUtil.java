@@ -11,10 +11,26 @@ import java.util.Map;
  */
 public class JwtUtil {
 
-    // 密钥
-    private static final String SECRET_KEY = "VIBE_MUSIC"; // 更改为你的密钥
-    // 设置 JWT 的过期时间 6 小时
-    private static final long EXPIRATION_TIME = 1000 * 60 * 60 * 6;
+    private static volatile String secretKey;
+    private static volatile long expirationTime = 1000 * 60 * 60 * 6;
+
+    private JwtUtil() {
+    }
+
+    public static void configure(String secret, long expirationMillis) {
+        if (secret == null || secret.length() < 32) {
+            throw new IllegalArgumentException("JWT secret must contain at least 32 characters");
+        }
+        secretKey = secret;
+        expirationTime = expirationMillis;
+    }
+
+    private static Algorithm algorithm() {
+        if (secretKey == null) {
+            throw new IllegalStateException("JWT is not configured");
+        }
+        return Algorithm.HMAC256(secretKey);
+    }
 
     /**
      * 生成 JWT token
@@ -25,8 +41,8 @@ public class JwtUtil {
     public static String generateToken(Map<String, Object> claims) {
         return JWT.create()
                 .withClaim("claims", claims) // 自定义的业务数据
-                .withExpiresAt(new Date(System.currentTimeMillis() + EXPIRATION_TIME)) // 设置过期时间
-                .sign(Algorithm.HMAC256(SECRET_KEY)); // 使用 HMAC256 算法加密
+                .withExpiresAt(new Date(System.currentTimeMillis() + expirationTime)) // 设置过期时间
+                .sign(algorithm()); // 使用 HMAC256 算法签名
     }
 
     /**
@@ -36,7 +52,10 @@ public class JwtUtil {
      * @return 自定义的业务数据
      */
     public static Map<String, Object> parseToken(String token) {
-        return JWT.require(Algorithm.HMAC256(SECRET_KEY))
+        if (token != null && token.startsWith("Bearer ")) {
+            token = token.substring(7);
+        }
+        return JWT.require(algorithm())
                 .build()
                 .verify(token)
                 .getClaim("claims")
