@@ -1,0 +1,33 @@
+:root {
+  --app-header-height: 64px;
+  --app-sidebar-width: 248px;
+  --app-player-height: 92px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --surface-raised: #15171b;
+  --surface-soft: #111318;
+  --surface-hover: #1a1d23;
+  --divider: rgb(255 255 255 / 0.08);
+  --focus-ring: 0 0 0 3px rgb(239 111 82 / 0.28);
+  --shadow-float: 0 18px 48px rgb(0 0 0 / 0.28);
+}
+
+@media (max-width: 960px) {
+  :root {
+    --app-sidebar-width: 76px;
+  }
+}
+
+@media (max-width: 720px) {
+  :root {
+    --app-player-height: 80px;
+  }
+}

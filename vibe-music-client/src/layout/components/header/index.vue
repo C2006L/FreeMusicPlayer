@@ -45,24 +45,24 @@ watch(
 )
 </script>
 <template>
-  <header class="px-5 py-2.5 border-b border-border flex items-center">
+  <header class="app-header flex items-center border-b border-border px-4">
     <button
-      class="flex relative w-60 items-center group"
+      class="brand-button group flex items-center"
       @click="router.push('/')"
     >
       <img
         src="\logo.svg"
         alt="logo"
-        class="w-9 h-9 ml-2 transition-transform duration-500 ease-spring group-hover:rotate-12"
+        class="h-8 w-8"
       />
       <span
-        class="ml-2.5 text-xl font-bold font-serif-display tracking-tight flex justify-center items-center"
-        >Vibe Music</span
+        class="brand-name ml-2.5 text-lg font-semibold tracking-tight"
+        >FreeMusicPlayer</span
       >
     </button>
     <!-- 输入框和头像 -->
-    <div class="flex items-center gap-3">
-      <div class="relative mr-6">
+    <div class="header-tools flex min-w-0 flex-1 items-center gap-3">
+      <div class="search-shell relative w-full max-w-xl">
         <Icon
           icon="mdi:magnify"
           class="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground text-lg pointer-events-none"
@@ -70,18 +70,28 @@ watch(
         <input
           v-model="searchText"
           type="text"
-          class="mt-0.5 w-64 text-sm pl-9 pr-3 py-2 rounded-xl bg-white border border-border shadow-paper focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all duration-300 ease-out-soft focus:w-80 placeholder:text-muted-foreground"
-          placeholder="搜索..."
+          class="h-10 w-full rounded-lg border border-border bg-muted/45 py-2 pl-10 pr-4 text-sm text-foreground outline-none transition placeholder:text-muted-foreground hover:border-border/80 focus:border-primary/60 focus:bg-muted/70"
+          placeholder="搜索歌曲、歌手或专辑"
           @keyup.enter="router.push('/library?query=' + searchText)"
         />
       </div>
       <button
-        class="p-2 rounded-full text-inactive hover:text-primary hover:bg-hoverMenuBg transition-all duration-300 ease-spring hover:rotate-12"
+        class="icon-button"
+        aria-label="切换深浅色主题"
         @click="toggleMode"
       >
         <Icon class="text-xl" :icon="currentIcon" />
       </button>
     </div>
-    <div class="ml-auto flex items-center gap-3"><Avatar /></div>
+    <div class="ml-3 flex items-center gap-3"><Avatar /></div>
   </header>
 </template>
+
+<style scoped>
+.app-header { min-height: var(--app-header-height); background: hsl(var(--background) / .96); }
+.brand-button { width: calc(var(--app-sidebar-width) - 16px); flex: 0 0 auto; }
+.icon-button { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 8px; color: hsl(var(--muted-foreground)); transition: color .15s ease, background .15s ease; }
+.icon-button:hover { color: hsl(var(--foreground)); background: hsl(var(--muted) / .7); }
+@media (max-width: 960px) { .brand-name { display: none; } .brand-button { width: 60px; justify-content: center; } }
+@media (max-width: 640px) { .app-header { padding-inline: 10px; } .brand-button { width: 42px; } .search-shell { max-width: none; } }
+</style>

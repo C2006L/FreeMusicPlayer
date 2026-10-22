@@ -23,4 +23,4 @@ vibe-music:
       api-key: api-key # 填写你的 DashScope API Key
   online:
     provider-url: http://127.0.0.1:3001
-    provider-public-url: http://127.0.0.1:3001
+    provider-public-url: http://127.0.0.1:8080/song

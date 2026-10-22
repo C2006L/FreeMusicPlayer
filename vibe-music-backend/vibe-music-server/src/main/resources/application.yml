@@ -97,4 +97,4 @@ minio:
 vibe-music:
   online:
     provider-url: ${VIBE_MUSIC_PROVIDER_URL:http://127.0.0.1:3001}
-    provider-public-url: ${VIBE_MUSIC_PROVIDER_PUBLIC_URL:http://127.0.0.1:3001}
+    provider-public-url: ${VIBE_MUSIC_PROVIDER_PUBLIC_URL:http://127.0.0.1:8080/song}

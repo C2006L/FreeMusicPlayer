@@ -43,6 +43,14 @@ export interface Song {
     releaseTime: string
     source?: string
     sourceName?: string
+    sourceSongId?: string
+    sourceUrlId?: string
+    sourcePicId?: string
+    sourceLyricId?: string
+    sourceExtra?: string
+    providerEngine?: string
+    availability?: 'unknown' | 'full' | 'preview' | 'restricted' | 'unavailable'
+    vip?: boolean
     online?: boolean
 }
 

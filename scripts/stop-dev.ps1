@@ -14,5 +14,5 @@ foreach ($name in @('admin', 'client', 'backend', 'provider')) {
     Remove-Item -LiteralPath $pidFile -Force
 }
 
-docker compose -f (Join-Path $projectRoot 'compose.dev.yml') down
+docker compose -f (Join-Path $projectRoot 'compose.dev.yml') --profile media down
 Write-Host 'Development services stopped. Data remains under .runtime.'

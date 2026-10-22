@@ -1,6 +1,7 @@
 package com.vibemusic.service;
 
 import com.vibemusic.model.dto.SongAddDTO;
+import com.vibemusic.model.dto.OnlineSongImportDTO;
 import com.vibemusic.model.dto.SongAndArtistDTO;
 import com.vibemusic.model.dto.SongDTO;
 import com.vibemusic.model.dto.SongUpdateDTO;
@@ -33,6 +34,8 @@ public interface ISongService extends IService<Song> {
 
     // 获取推荐歌曲
     Result<List<SongVO>> getRecommendedSongs(HttpServletRequest request);
+
+    Result<Long> importOnlineSong(OnlineSongImportDTO song);
 
     // 根据id获取歌曲详情
     Result<SongDetailVO> getSongDetail(Long songId, HttpServletRequest request);

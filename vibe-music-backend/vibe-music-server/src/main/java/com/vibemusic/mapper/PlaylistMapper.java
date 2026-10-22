@@ -39,6 +39,11 @@ public interface PlaylistMapper extends BaseMapper<Playlist> {
                 p.title AS title, 
                 p.cover_url AS coverUrl
             FROM tb_playlist p
+            WHERE EXISTS (
+                SELECT 1 FROM tb_playlist_binding pb
+                JOIN tb_song s ON s.id = pb.song_id
+                WHERE pb.playlist_id = p.id AND s.media_status = 'active'
+            )
             ORDER BY RAND() 
             LIMIT #{limit}
             """)

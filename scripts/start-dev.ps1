@@ -1,5 +1,6 @@
 param(
-    [switch]$WithoutAdmin
+    [switch]$WithoutAdmin,
+    [switch]$WithMinio
 )
 
 $ErrorActionPreference = 'Stop'
@@ -8,6 +9,10 @@ $runtimeRoot = Join-Path $projectRoot '.runtime'
 $logRoot = Join-Path $runtimeRoot 'logs'
 $pidRoot = Join-Path $runtimeRoot 'pids'
 New-Item -ItemType Directory -Force -Path $logRoot, $pidRoot | Out-Null
+$goMusicRuntime = Join-Path $runtimeRoot 'go-music-api'
+New-Item -ItemType Directory -Force -Path $goMusicRuntime | Out-Null
+$goMusicCookies = Join-Path $goMusicRuntime 'cookies.json'
+if (-not (Test-Path $goMusicCookies)) { Set-Content -Path $goMusicCookies -Value '{}' -Encoding utf8 }
 
 function Wait-Port([int]$Port, [int]$TimeoutSeconds = 120) {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
@@ -48,13 +53,21 @@ function Start-ManagedProcess(
     Write-Host "Started $Name (PID $($process.Id))."
 }
 
-Write-Host 'Starting MySQL, Redis and MinIO ...'
-docker compose -f (Join-Path $projectRoot 'compose.dev.yml') up -d
+if ($WithMinio) {
+    Write-Host 'Starting MySQL, Redis and optional MinIO ...'
+    docker compose -f (Join-Path $projectRoot 'compose.dev.yml') --profile media up -d
+} else {
+    Write-Host 'Starting MySQL and Redis (MinIO disabled) ...'
+    docker compose -f (Join-Path $projectRoot 'compose.dev.yml') --profile media stop minio minio-init 2>$null
+    docker compose -f (Join-Path $projectRoot 'compose.dev.yml') up -d mysql redis go-music-api
+}
 if ($LASTEXITCODE -ne 0) { throw 'Docker infrastructure failed to start.' }
 Wait-Port 13306
 Wait-Port 6379
-Wait-Port 9000
+Wait-Port 3002 120
+if ($WithMinio) { Wait-Port 9000 }
 
+$env:GO_MUSIC_API_URL = 'http://127.0.0.1:3002'
 Start-ManagedProcess 'provider' 'node.exe' @('server.mjs') (Join-Path $projectRoot 'vibe-music-provider')
 Wait-Port 3001 30
 
@@ -68,10 +81,12 @@ if (-not (Test-Path $dockerConfig)) {
     throw "Docker development config is missing: $dockerConfig"
 }
 $configUri = ([System.Uri]$dockerConfig).AbsoluteUri
+$minioEnabled = $WithMinio.ToString().ToLowerInvariant()
 Start-ManagedProcess 'backend' 'java.exe' @(
     '-jar',
     $backendJar,
-    "--spring.config.additional-location=$configUri"
+    "--spring.config.additional-location=$configUri",
+    "--vibe-music.minio.enabled=$minioEnabled"
 ) $backendDir
 Wait-Port 8080 180
 
@@ -86,9 +101,10 @@ if (-not $WithoutAdmin) {
 }
 
 Write-Host ''
-Write-Host 'Vibe Music is ready:' -ForegroundColor Green
+Write-Host 'FreeMusicPlayer is ready:' -ForegroundColor Green
 Write-Host '  User client:  http://localhost:8090'
 if (-not $WithoutAdmin) { Write-Host '  Admin client: http://localhost:8089' }
 Write-Host '  Backend API:  http://localhost:8080'
-Write-Host '  MinIO console:http://localhost:9001  (minioadmin / minioadmin)'
+Write-Host '  Source API:   http://localhost:3002'
+if ($WithMinio) { Write-Host '  MinIO console:http://localhost:9001  (minioadmin / minioadmin)' }
 Write-Host "  Logs:         $logRoot"

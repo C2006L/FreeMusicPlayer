@@ -1,5 +1,5 @@
 /**
- * VibeAgent 接口
+ * FreeMusic Assistant 接口
  * 聊天接口是 POST + SSE 流式输出，用 fetch 手动解析，不走 axios（避免响应拦截器干扰）
  */
 const BASE_URL = import.meta.env.VITE_APP_BASE_API || 'http://localhost:8080'

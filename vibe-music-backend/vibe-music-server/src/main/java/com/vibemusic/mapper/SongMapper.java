@@ -33,12 +33,20 @@ public interface SongMapper extends BaseMapper<Song> {
                     s.duration, 
                     s.cover_url AS coverUrl, 
                     s.audio_url AS audioUrl, 
+                    s.source,
+                    s.source_song_id AS sourceSongId,
+                    s.source_url_id AS sourceUrlId,
+                    s.source_pic_id AS sourcePicId,
+                    s.source_extra AS sourceExtra,
+                    s.provider_engine AS providerEngine,
+                    s.media_status AS mediaStatus,
+                    (s.source NOT IN ('local', 'legacy-local')) AS online,
                     s.release_time AS releaseTime, 
                     a.name AS artistName
                 FROM tb_song s
                 LEFT JOIN tb_artist a ON s.artist_id = a.id
-                WHERE 
-                    (#{songName} IS NULL OR s.name LIKE CONCAT('%', #{songName}, '%'))
+                WHERE s.media_status = 'active'
+                    AND (#{songName} IS NULL OR s.name LIKE CONCAT('%', #{songName}, '%'))
                     AND (#{artistName} IS NULL OR a.name LIKE CONCAT('%', #{artistName}, '%'))
                     AND (#{album} IS NULL OR s.album LIKE CONCAT('%', #{album}, '%'))
             """)
@@ -63,8 +71,8 @@ public interface SongMapper extends BaseMapper<Song> {
                     a.name AS artistName
                 FROM tb_song s
                 LEFT JOIN tb_artist a ON s.artist_id = a.id
-                WHERE 
-                    (#{artistId} IS NULL OR s.artist_id = #{artistId})
+                WHERE s.media_status = 'active'
+                    AND (#{artistId} IS NULL OR s.artist_id = #{artistId})
                     AND(#{songName} IS NULL OR s.name LIKE CONCAT('%', #{songName}, '%'))
                     AND (#{album} IS NULL OR s.album LIKE CONCAT('%', #{album}, '%'))
                 ORDER BY s.release_time DESC
@@ -87,6 +95,7 @@ public interface SongMapper extends BaseMapper<Song> {
                     a.name AS artistName
                 FROM tb_song s
                 LEFT JOIN tb_artist a ON s.artist_id = a.id
+                WHERE s.media_status = 'active'
                 ORDER BY RAND() LIMIT 20
             """)
     List<SongVO> getRandomSongsWithArtist();
@@ -104,7 +113,8 @@ public interface SongMapper extends BaseMapper<Song> {
                     a.name AS artistName
                 FROM tb_song s
                 LEFT JOIN tb_artist a ON s.artist_id = a.id
-                WHERE #{keyword} IS NOT NULL AND #{keyword} <> ''
+                WHERE s.media_status = 'active'
+                  AND #{keyword} IS NOT NULL AND #{keyword} <> ''
                   AND (s.name LIKE CONCAT('%', #{keyword}, '%')
                        OR a.name LIKE CONCAT('%', #{keyword}, '%')
                        OR s.album LIKE CONCAT('%', #{keyword}, '%'))

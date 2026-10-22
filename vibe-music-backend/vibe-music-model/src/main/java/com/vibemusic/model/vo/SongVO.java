@@ -55,6 +55,16 @@ public class SongVO implements Serializable {
      */
     private Integer likeStatus;
 
+    private String source;
+    private String sourceName;
+    private String sourceSongId;
+    private String sourceUrlId;
+    private String sourcePicId;
+    private String sourceExtra;
+    private String providerEngine;
+    private String mediaStatus;
+    private Boolean online;
+
     /**
      * 歌曲发行时间
      */

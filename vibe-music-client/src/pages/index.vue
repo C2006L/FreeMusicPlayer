@@ -1,410 +1,195 @@
 <script setup lang="ts">
-import {
-  getRecommendedPlaylists,
-  getRecommendedSongs,
-  getBanner,
-} from '@/api/system'
-import coverImg from '@/assets/cover.png'
-import { formatTime, replaceUrlParams } from '@/utils'
+import { discoverOnlineSongs } from '@/api/system'
+import defaultAlbum from '@/assets/default_album.jpg'
+import { formatTime } from '@/utils'
 import { ElNotification } from 'element-plus'
-import { UserStore } from '@/stores/modules/user'
+
 const router = useRouter()
 const audio = AudioStore()
-const user = UserStore()
-
 const { loadTrack, play, isPlaying } = useAudioPlayer()
 
-const bannerList = ref<{ bannerId: number; bannerUrl: string }[]>([])
-
-// 推荐歌单
-const recommendedPlaylist = ref([])
-// 推荐歌曲
-const recommendedSongList = ref([])
-
-// 监听用户登录状态
-watch(
-  () => user.isLoggedIn,
-  (newVal) => {
-    if (newVal) {
-      // 用户登录后重新获取推荐数据
-      getRecommendedData()
-    }
-  }
-)
-
-// 获取轮播图数据
-const fetchBannerData = async () => {
-  try {
-    const result = await getBanner()
-    if (result.code === 0 && Array.isArray(result.data)) {
-      bannerList.value = result.data
-    } else {
-      ElNotification({
-        type: 'error',
-        message: '获取轮播图失败',
-        duration: 2000,
-      })
-    }
-  } catch (error) {
-    console.error('Error fetching banner data:', error)
-    ElNotification({
-      type: 'error',
-      message: '获取轮播图时发生错误',
-      duration: 2000,
-    })
-  }
-}
-
-// 获取推荐数据
-const getRecommendedData = async () => {
-  // 获取推荐歌单
-  const result = await getRecommendedPlaylists()
-  if (result.code === 0 && Array.isArray(result.data)) {
-    recommendedPlaylist.value = result.data.map((item) => ({
-      playlistId: item.playlistId,
-      title: item.title,
-      coverUrl: item.coverUrl ?? coverImg,
-    }))
-  } else {
-    ElNotification({
-      type: 'error',
-      message: '获取推荐歌单失败',
-      duration: 2000,
-    })
-  }
-
-  // 获取推荐歌曲
-  handleRefreshSongs()
-}
-
-onMounted(async () => {
-  // 获取轮播图数据
-  fetchBannerData()
-  // 初始化时获取推荐数据
-  getRecommendedData()
-})
+const recommendedSongList = ref<any[]>([])
+const loading = ref(false)
+const onlineUnavailable = ref(false)
+const recentTracks = computed(() => audio.trackList.slice(-6).reverse())
+const featured = computed(() => recommendedSongList.value[0])
 
 const handleRefreshSongs = async () => {
-  const result = await getRecommendedSongs()
-  if (result.code === 0 && Array.isArray(result.data)) {
-    recommendedSongList.value = result.data.map((item) => ({
+  loading.value = true
+  onlineUnavailable.value = false
+  try {
+    const result = await discoverOnlineSongs(20)
+    if (result.code !== 0 || !Array.isArray(result.data)) {
+      throw new Error(result.message || '在线推荐暂时不可用')
+    }
+    recommendedSongList.value = result.data.map((item: any) => ({
       id: item.songId,
       name: item.songName,
-      artists: [
-        {
-          name: item.artistName,
-        },
-      ],
-      album: {
-        name: item.album,
-        picUrl: item.coverUrl,
-      },
-      duration: item.duration,
+      artists: [{ name: item.artistName }],
+      album: { name: item.album, picUrl: item.coverUrl },
+      duration: Number(item.duration) || 0,
       audioUrl: item.audioUrl,
-      likeStatus: item.likeStatus || 0, // 从服务端获取收藏状态
+      likeStatus: item.likeStatus || 0,
+      sourceName: item.sourceName,
+      source: item.source,
+      sourceSongId: item.sourceSongId,
+      sourceUrlId: item.sourceUrlId,
+      sourcePicId: item.sourcePicId,
+      sourceLyricId: item.sourceLyricId,
+      online: true,
     }))
-  } else {
+  } catch (error: any) {
+    recommendedSongList.value = []
+    onlineUnavailable.value = true
     ElNotification({
-      type: 'error',
-      message: '获取推荐歌曲失败',
-      duration: 2000,
+      type: 'warning',
+      title: '在线音源暂时不可用',
+      message: error?.message || '请检查在线音源服务是否已启动',
+      duration: 3000,
     })
+  } finally {
+    loading.value = false
   }
 }
 
-// 转换歌曲实体
-const convertToTrackModel = (song: any) => {
-  return {
-    id: song.id.toString(),
-    title: song.name,
-    artist: song.artists.map((artist: any) => artist.name).join(', '),
-    album: song.album.name,
-    cover: song.album.picUrl || '',
-    url: song.audioUrl,
-    duration: song.duration,
-    likeStatus: song.likeStatus || 0, // 保持收藏状态
-  }
-}
+onMounted(handleRefreshSongs)
 
-const handlePlaylclick = async (row: any) => {
-  // 将所有推荐歌曲转换为 trackModel
-  const allTracks = recommendedSongList.value
-    .map((song) => convertToTrackModel(song))
-    .filter((track) => track !== null)
+const convertToTrackModel = (song: any) => ({
+  id: String(song.id),
+  title: song.name,
+  artist: song.artists.map((artist: any) => artist.name).join(', '),
+  album: song.album.name,
+  cover: song.album.picUrl || defaultAlbum,
+  url: song.audioUrl,
+  duration: song.duration,
+  likeStatus: song.likeStatus || 0,
+  source: song.source,
+  sourceName: song.sourceName,
+  sourceSongId: song.sourceSongId,
+  sourceUrlId: song.sourceUrlId,
+  sourcePicId: song.sourcePicId,
+  sourceLyricId: song.sourceLyricId,
+  online: song.online,
+})
 
-  // 找到当前选中歌曲的索引
-  const selectedIndex = recommendedSongList.value.findIndex(
-    (song) => song.id === row.id
-  )
-
-  // 清空现有播放列表并添加所有歌曲
+const handlePlayClick = async (row: any) => {
+  const allTracks = recommendedSongList.value.map(convertToTrackModel)
+  const selectedIndex = recommendedSongList.value.findIndex((song) => song.id === row.id)
   audio.setAudioStore('trackList', allTracks)
-  // 设置当前播放索引为选中的歌曲
   audio.setAudioStore('currentSongIndex', selectedIndex)
-
-  // 播放
   await loadTrack()
   play()
 }
 
-// 判断是否是当前播放的歌曲
-const isCurrentPlaying = (songId: number) => {
+const isCurrentPlaying = (songId: number | string) => {
   const currentTrack = audio.trackList[audio.currentSongIndex]
-  return currentTrack && Number(currentTrack.id) === songId
+  return currentTrack && currentTrack.id === String(songId)
 }
 </script>
+
 <template>
-  <div class="flex gap-6 px-8 py-6 w-full">
-    <div class="flex-1 min-w-0">
-      <!-- banner -->
-      <section class="w-full mb-12" v-reveal>
-        <el-carousel
-          v-if="bannerList.length"
-          :interval="4000"
-          type="card"
-          height="280px"
-        >
-          <el-carousel-item
-            v-for="(item, index) in bannerList"
-            :key="item.bannerId"
-          >
-            <img
-              :src="item.bannerUrl"
-              class="w-full h-full object-cover"
-              decoding="async"
-              :fetchpriority="index === 0 ? 'high' : 'auto'"
-            />
-          </el-carousel-item>
-        </el-carousel>
-        <div v-else class="h-[280px] rounded-xl bg-muted animate-pulse"></div>
-      </section>
-
-      <!-- 推荐歌单 -->
-      <section class="w-full mb-12" v-reveal>
-        <div
-          class="flex justify-between items-end border-b border-border pb-4 mb-6"
-        >
-          <div>
-            <p
-              class="text-[10px] font-semibold tracking-[0.3em] text-primary mb-1.5"
-            >
-              WEEKLY SELECTION
-            </p>
-            <h2
-              class="text-2xl font-bold font-serif-display tracking-tight flex items-baseline gap-3"
-            >
-              今日为你推荐
-              <span
-                class="text-[11px] font-sans font-normal tracking-[0.2em] text-muted-foreground"
-                >No.01</span
-              >
-            </h2>
-          </div>
-          <button
-            @click="router.push('/playlist')"
-            class="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-primary transition-colors duration-200"
-          >
-            更多
-            <icon-hugeicons:more class="text-base" />
-          </button>
+  <div class="home-page w-full px-5 py-6 md:px-8">
+    <section class="editorial-hero mb-12">
+      <div class="hero-copy">
+        <p class="mb-3 text-[10px] font-semibold tracking-[0.28em] text-primary">FREE MUSIC PLAYER · DISCOVER</p>
+        <h1 class="mb-4 max-w-2xl text-4xl font-semibold leading-[1.12] tracking-tight md:text-5xl">从一首真正可播放的歌开始。</h1>
+        <p class="mb-7 max-w-xl text-sm leading-7 text-muted-foreground">聚合本地曲库与可用在线来源。试听、完整播放和不可用状态都会明确标注，不用失效链接伪装曲库。</p>
+        <div class="flex flex-wrap gap-3">
+          <button class="primary-action" @click="router.push('/library')"><icon-tabler:search />搜索音乐</button>
+          <button v-if="featured" class="secondary-action" @click="handlePlayClick(featured)"><icon-tabler:player-play-filled />播放今日首选</button>
         </div>
+      </div>
+      <button v-if="featured" class="feature-art" :aria-label="`播放 ${featured.name}`" @click="handlePlayClick(featured)">
+        <img :src="featured.album.picUrl || defaultAlbum" :alt="featured.name" />
+        <span><small>今日首选</small><strong>{{ featured.name }}</strong><em>{{ featured.artists.map((artist: any) => artist.name).join(' / ') }}</em></span>
+      </button>
+    </section>
 
-        <div
-          v-if="recommendedPlaylist.length"
-          class="grid grid-cols-3 md:grid-cols-5 gap-5"
-        >
-          <div
-            v-for="(i, index) in recommendedPlaylist.slice(0, 5)"
-            :key="i.playlistId"
-            class="group rounded-xl bg-card border border-border/60 shadow-paper cursor-pointer overflow-hidden transition-all duration-300 ease-out-soft hover:-translate-y-1 hover:shadow-paper-lg"
-            v-reveal="index * 70"
-            @click="router.push(`/playlist/${i.playlistId}`)"
-          >
-            <div class="aspect-square overflow-hidden relative">
-              <img
-                :alt="i.title"
-                decoding="async"
-                class="w-full h-full object-cover transition-transform duration-500 ease-out-soft group-hover:scale-105"
-                :src="replaceUrlParams(i.coverUrl ?? coverImg, 'param=350y350')"
-              />
-              <div
-                class="absolute inset-0 bg-black/0 group-hover:bg-black/15 transition-colors duration-300"
-              ></div>
-              <div
-                class="absolute bottom-2.5 right-2.5 w-9 h-9 rounded-full bg-primary text-white flex items-center justify-center opacity-0 translate-y-1.5 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300 ease-spring shadow-lg pointer-events-none"
-              >
-                <icon-tabler:player-play-filled class="text-sm ml-0.5" />
-              </div>
-            </div>
-            <div class="p-3">
-              <h3 class="line-clamp-2 text-sm font-medium playlist-title">
-                {{ i.title }}
-              </h3>
+    <section v-if="recentTracks.length" class="mb-12">
+      <div class="section-heading"><div><p>RECENTLY PLAYED</p><h2>继续聆听</h2></div></div>
+      <div class="cover-strip">
+        <button v-for="track in recentTracks" :key="track.id" class="recent-cover" @click="router.push('/library?query=' + encodeURIComponent(track.title))">
+          <img :src="track.cover || defaultAlbum" :alt="track.title" /><strong>{{ track.title }}</strong><span>{{ track.artist }}</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="w-full">
+      <div class="section-heading mb-4">
+        <div>
+          <p>ONLINE DISCOVERY</p>
+          <h2>在线发现</h2>
+        </div>
+        <button class="group/refresh inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-primary"
+          :disabled="loading" @click="handleRefreshSongs">
+          {{ loading ? '加载中' : '换一批' }}
+          <icon-tabler:refresh class="text-base transition-transform duration-500 group-hover/refresh:rotate-180" />
+        </button>
+      </div>
+
+      <div v-if="recommendedSongList.length" class="grid grid-cols-1 gap-x-16 gap-y-1 md:grid-cols-2">
+        <div v-for="(item, index) in recommendedSongList" :key="item.id"
+          class="group grid w-full cursor-pointer grid-cols-[auto_auto_2fr_1fr] items-center gap-4 rounded-md p-2 transition-all duration-200"
+          :class="isCurrentPlaying(item.id) ? 'bg-activeMenuBg' : 'hover:bg-hoverMenuBg'"
+          @click="handlePlayClick(item)">
+          <span class="w-6 text-right font-serif-display text-xs tabular-nums text-muted-foreground">
+            {{ String(index + 1).padStart(2, '0') }}
+          </span>
+          <div class="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-lg">
+            <el-image :alt="item.name" class="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+              :src="item.album.picUrl || defaultAlbum" fit="cover">
+              <template #error><img :src="defaultAlbum" class="h-full w-full object-cover" /></template>
+            </el-image>
+            <div class="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition group-hover:bg-black/50 group-hover:opacity-100">
+              <icon-tabler:player-play-filled class="text-lg" />
             </div>
           </div>
+          <div class="ml-1 min-w-0 text-left">
+            <h3 class="flex items-center gap-2 font-medium" :class="isCurrentPlaying(item.id) ? 'text-primary' : ''">
+              <span class="truncate">{{ item.name }}</span>
+              <span class="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">{{ item.sourceName }}</span>
+              <PlayingIndicator v-if="isCurrentPlaying(item.id)" :paused="!isPlaying" class="flex-shrink-0 scale-75" />
+            </h3>
+            <p class="truncate text-sm text-muted-foreground">{{ item.artists.map((artist: any) => artist.name).join(' ') }}</p>
+          </div>
+          <p class="mr-3 text-right text-sm tabular-nums text-muted-foreground">{{ Number(item.duration) > 0 ? formatTime(item.duration) : '--:--' }}</p>
         </div>
-        <!-- 加载态：纸感骨架 -->
-        <div v-else class="grid grid-cols-3 md:grid-cols-5 gap-5">
-          <div
-            v-for="n in 5"
-            :key="n"
-            class="rounded-xl bg-card border border-border/60 overflow-hidden"
-          >
-            <div class="aspect-square w-full bg-muted animate-pulse"></div>
-            <div class="p-3 space-y-2">
-              <div class="h-3.5 w-4/5 rounded bg-muted animate-pulse"></div>
-              <div class="h-3 w-1/2 rounded bg-muted animate-pulse"></div>
-            </div>
+      </div>
+
+      <div v-else-if="onlineUnavailable" class="rounded-2xl border border-dashed border-border p-12 text-center">
+        <h3 class="mb-2 text-lg font-medium">在线音源暂时无法连接</h3>
+        <p class="mb-5 text-sm text-muted-foreground">这不会影响登录、收藏等本地功能，请检查 provider 服务后重试。</p>
+        <button class="rounded-full border border-border px-5 py-2 text-sm hover:border-primary hover:text-primary" @click="handleRefreshSongs">重新连接</button>
+      </div>
+
+      <div v-else class="grid grid-cols-1 gap-x-16 gap-y-1 md:grid-cols-2">
+        <div v-for="n in 10" :key="n" class="flex items-center gap-4 p-2">
+          <div class="h-14 w-14 flex-shrink-0 animate-pulse rounded-lg bg-muted"></div>
+          <div class="flex-1 space-y-2">
+            <div class="h-3.5 w-3/5 animate-pulse rounded bg-muted"></div>
+            <div class="h-3 w-2/5 animate-pulse rounded bg-muted"></div>
           </div>
         </div>
-      </section>
-
-      <!-- 推荐歌曲 -->
-      <section class="w-full" v-reveal>
-        <div
-          class="flex justify-between items-end border-b border-border pb-4 mb-6"
-        >
-          <div>
-            <p
-              class="text-[10px] font-semibold tracking-[0.3em] text-primary mb-1.5"
-            >
-              FOR YOUR TASTE
-            </p>
-            <h2
-              class="text-2xl font-bold font-serif-display tracking-tight flex items-baseline gap-3"
-            >
-              相似推荐
-              <span
-                class="text-[11px] font-sans font-normal tracking-[0.2em] text-muted-foreground"
-                >No.02</span
-              >
-            </h2>
-          </div>
-          <button
-            @click="handleRefreshSongs()"
-            class="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-primary transition-colors duration-200 group/refresh"
-          >
-            刷新
-            <icon-tabler:refresh
-              class="text-base transition-transform duration-500 group-hover/refresh:rotate-180"
-            />
-          </button>
-        </div>
-
-        <el-scrollbar
-          v-if="recommendedSongList.length"
-          class="h-full"
-          overflow-auto
-        >
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-x-16 gap-y-1">
-            <div
-              v-for="(item, index) in recommendedSongList"
-              :key="item.id"
-              class="grid grid-cols-[auto_auto_2fr_1fr] items-center gap-4 p-2 transition-all duration-200 rounded-xl w-full group cursor-pointer"
-              v-reveal="index * 40"
-              :class="[
-                isCurrentPlaying(item.id)
-                  ? 'bg-activeMenuBg'
-                  : 'hover:bg-hoverMenuBg',
-              ]"
-              @click.stop="handlePlaylclick(item)"
-            >
-              <!-- 序号 -->
-              <span
-                class="text-xs font-serif-display text-muted-foreground w-6 text-right tabular-nums"
-              >
-                {{ String(index + 1).padStart(2, '0') }}
-              </span>
-              <!-- 专辑封面 -->
-              <div
-                class="w-14 h-14 rounded-lg overflow-hidden relative flex-shrink-0"
-              >
-                <el-image
-                  :alt="item.name"
-                  class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                  :src="item.album.picUrl + '?param=90y90'"
-                />
-                <!-- Play 按钮，使用 group-hover 控制透明度 -->
-                <button
-                  @click.stop="handlePlaylclick(item)"
-                  class="absolute inset-0 flex items-center justify-center text-white opacity-0 transition-opacity duration-300 z-10 group-hover:opacity-100 group-hover:bg-black/50"
-                >
-                  <icon-tabler:player-play-filled class="text-lg" />
-                </button>
-              </div>
-
-              <div class="truncate text-left ml-1">
-                <!-- 歌曲名称 -->
-                <h3
-                  class="font-medium flex items-center gap-2"
-                  :class="isCurrentPlaying(item.id) ? 'text-primary' : ''"
-                >
-                  <span class="truncate">{{ item.name }}</span>
-                  <PlayingIndicator
-                    v-if="isCurrentPlaying(item.id)"
-                    :paused="!isPlaying"
-                    class="flex-shrink-0 scale-75 origin-left"
-                  />
-                </h3>
-                <!-- 艺术家 -->
-                <p class="text-sm text-muted-foreground line-clamp-1">
-                  {{ item.artists.map((item) => item.name).join(' ') }}
-                </p>
-              </div>
-
-              <!-- 时长 -->
-              <div class="text-right mr-3">
-                <p
-                  class="text-sm text-muted-foreground line-clamp-1 tabular-nums"
-                >
-                  {{ formatTime(item.duration) }}
-                </p>
-              </div>
-            </div>
-          </div>
-        </el-scrollbar>
-        <!-- 加载态：纸感骨架 -->
-        <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-x-16 gap-y-1">
-          <div v-for="n in 8" :key="n" class="flex items-center gap-4 p-2">
-            <div
-              class="w-14 h-14 rounded-lg bg-muted animate-pulse flex-shrink-0"
-            ></div>
-            <div class="flex-1 space-y-2">
-              <div class="h-3.5 w-3/5 rounded bg-muted animate-pulse"></div>
-              <div class="h-3 w-2/5 rounded bg-muted animate-pulse"></div>
-            </div>
-          </div>
-        </div>
-      </section>
-    </div>
+      </div>
+    </section>
   </div>
 </template>
 
 <style scoped>
-:deep(.el-carousel__item) {
-  --el-carousel-item-scale: 1.2;
-  /* 默认是 0.83，可以调整 */
-}
-
-/* 让所有图片撑满 */
-.el-carousel__item img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  border-radius: 12px;
-}
-
-.playlist-title {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  text-align: left;
-  min-height: 2.5em;
-  /* 固定两行高度 */
-  line-height: 1.25;
-  /* 行高 */
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+.home-page { max-width: 1480px; margin-inline: auto; }
+.editorial-hero { display: grid; min-height: 360px; grid-template-columns: minmax(0,1.35fr) minmax(260px,.65fr); align-items: end; gap: clamp(28px,6vw,88px); padding: 44px 6px 36px; border-bottom: 1px solid hsl(var(--border)); }
+.hero-copy { align-self: center; }
+.primary-action,.secondary-action { display:inline-flex; height:42px; align-items:center; gap:8px; border-radius:7px; padding-inline:18px; font-size:13px; font-weight:600; transition:background .15s ease,color .15s ease,border .15s ease; }
+.primary-action { color:#141519; background:var(--primary); }.primary-action:hover { filter:brightness(1.07); }
+.secondary-action { border:1px solid hsl(var(--border)); color:hsl(var(--foreground)); }.secondary-action:hover { border-color:var(--primary); color:var(--primary); }
+.feature-art { position:relative; aspect-ratio:1; width:min(100%,330px); justify-self:end; overflow:hidden; background:hsl(var(--muted)); text-align:left; }
+.feature-art img { width:100%; height:100%; object-fit:cover; transition:transform .35s ease; }.feature-art:hover img { transform:scale(1.025); }
+.feature-art span { position:absolute; inset:auto 0 0; display:grid; gap:2px; padding:42px 18px 16px; color:white; background:linear-gradient(transparent,rgb(0 0 0/.78)); }
+.feature-art small { font-size:9px; letter-spacing:.16em; opacity:.74; }.feature-art strong { font-size:17px; }.feature-art em { overflow:hidden; font-size:11px; font-style:normal; text-overflow:ellipsis; white-space:nowrap; opacity:.72; }
+.section-heading { display:flex; align-items:end; justify-content:space-between; border-bottom:1px solid hsl(var(--border)); padding-bottom:14px; }
+.section-heading p { margin-bottom:4px; color:var(--primary); font-size:9px; font-weight:700; letter-spacing:.24em; }.section-heading h2 { font-size:22px; font-weight:600; letter-spacing:-.02em; }
+.cover-strip { display:grid; grid-template-columns:repeat(6,minmax(120px,1fr)); gap:18px; padding-top:18px; }
+.recent-cover { min-width:0; text-align:left; }.recent-cover img { aspect-ratio:1; width:100%; object-fit:cover; border-radius:7px; }.recent-cover strong,.recent-cover span { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.recent-cover strong { margin-top:9px; font-size:13px; }.recent-cover span { margin-top:2px; color:hsl(var(--muted-foreground)); font-size:11px; }
+@media(max-width:900px){.editorial-hero{grid-template-columns:1fr minmax(190px,.5fr)}.cover-strip{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:640px){.editorial-hero{grid-template-columns:1fr;min-height:auto}.feature-art{display:none}.cover-strip{grid-template-columns:repeat(2,1fr)}}
 </style>

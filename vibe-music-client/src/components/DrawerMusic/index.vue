@@ -31,9 +31,11 @@ const { currentTrack } = useAudioPlayer()
 watch(
   () => currentTrack.value.id,
   async (newId) => {
-    if (newId) {
+    songDetail.value = null
+    const numericId = Number(newId)
+    if (newId && Number.isFinite(numericId) && numericId > 0 && !currentTrack.value.online) {
       try {
-        const res = await getSongDetail(Number(newId))
+        const res = await getSongDetail(numericId)
         if (res.code === 0 && res.data) {
           // 确保返回的数据符合 SongDetail 接口
           const songData = res.data as unknown as SongDetail
@@ -44,6 +46,7 @@ watch(
             'album' in songData
           ) {
             songDetail.value = songData
+            currentTrack.value.lyric = songData.lyric || ''
           } else {
             console.error('歌曲详情数据格式不正确')
           }
@@ -66,10 +69,11 @@ provide('songDetail', songDetail)
     }"
     v-model="showDrawer"
     direction="btt"
-    size="100%"
+    size="100vh"
+    append-to-body
     :modal="false"
     :showClose="false"
-    class="drawer-bg backdrop-filter backdrop-blur-md"
+    class="now-playing-drawer"
   >
     <template #header>
       <div class="flex items-center justify-between">
@@ -86,15 +90,13 @@ provide('songDetail', songDetail)
         </div>
       </div>
     </template>
-    <main class="flex h-full">
-      <div class="flex w-full flex-1">
-        <div class="w-1/2">
+    <main class="drawer-content h-full">
+        <div class="player-pane">
           <Left />
         </div>
-        <div class="w-1/2 relative">
+        <div class="lyrics-pane">
           <Right />
         </div>
-      </div>
     </main>
     <template #footer>
       <div class="flex justify-end gap-2">
@@ -109,22 +111,11 @@ provide('songDetail', songDetail)
 </template>
 
 <style scoped>
-.drawer-bg {
-  background-image: var(--track-cover-url);
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
-}
-
-.drawer-bg::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(250, 247, 242, 0.82);
-  backdrop-filter: blur(20px);
-  z-index: -1;
-}
+.drawer-content { display:grid; grid-template-columns:minmax(420px,.9fr) minmax(440px,1.1fr); overflow:hidden; }
+.player-pane,.lyrics-pane { min-width:0; min-height:0; }.player-pane { border-right:1px solid hsl(var(--border)); }
+:global(.now-playing-drawer.el-drawer) { background:hsl(var(--background)); color:hsl(var(--foreground)); }
+:global(.now-playing-drawer .el-drawer__header) { height:58px; margin:0; padding:0 22px; border-bottom:1px solid hsl(var(--border)); color:hsl(var(--foreground)); }
+:global(.now-playing-drawer .el-drawer__body) { min-height:0; padding:0; overflow:hidden; }
+:global(.now-playing-drawer .el-drawer__footer) { padding:8px 22px; border-top:1px solid hsl(var(--border)); }
+@media(max-width:900px){.drawer-content{grid-template-columns:1fr}.player-pane{display:none}.lyrics-pane{height:100%}}
 </style>

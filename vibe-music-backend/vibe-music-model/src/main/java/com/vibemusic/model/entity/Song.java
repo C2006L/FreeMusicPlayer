@@ -37,6 +37,34 @@ public class Song implements Serializable {
     private Long songId;
 
     /**
+     * local/legacy-local or an online provider name.
+     */
+    @TableField("source")
+    private String source;
+
+    @TableField("source_song_id")
+    private String sourceSongId;
+
+    @TableField("source_url_id")
+    private String sourceUrlId;
+
+    @TableField("source_pic_id")
+    private String sourcePicId;
+
+    /**
+     * Opaque JSON metadata required by a few upstream providers. It is never
+     * interpreted by the application and is only forwarded to the provider.
+     */
+    @TableField("source_extra")
+    private String sourceExtra;
+
+    @TableField("provider_engine")
+    private String providerEngine;
+
+    @TableField("media_status")
+    private String mediaStatus;
+
+    /**
      * 歌手 id
      */
     @TableField("artist_id")

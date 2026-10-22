@@ -16,6 +16,9 @@ New-Item -ItemType Directory -Force -Path (Join-Path $runtimeRoot 'pnpm-store') 
 New-Item -ItemType Directory -Force -Path (Join-Path $runtimeRoot 'npm-cache') | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $runtimeRoot 'logs') | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $runtimeRoot 'pids') | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $runtimeRoot 'go-music-api') | Out-Null
+$goMusicCookies = Join-Path $runtimeRoot 'go-music-api\cookies.json'
+if (-not (Test-Path $goMusicCookies)) { Set-Content -Path $goMusicCookies -Value '{}' -Encoding utf8 }
 
 Write-Host 'Installing provider dependencies on D: ...'
 Push-Location (Join-Path $projectRoot 'vibe-music-provider')

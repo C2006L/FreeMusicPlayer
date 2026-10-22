@@ -2,10 +2,11 @@
 import { formatTime } from '@/utils'
 import { Icon } from '@iconify/vue'
 import type { SongDetail } from '@/api/interface'
-import { ref, inject, type Ref } from 'vue'
+import { inject, type Ref } from 'vue'
 import { useAudioPlayer } from '@/hooks/useAudioPlayer'
 import vinylImg from '@/assets/vinyl.png'
 import Recently from '../../layout/components/footer/components/recently.vue'
+import defaultAlbum from '@/assets/default_album.jpg'
 
 const {
   currentTrack,
@@ -16,10 +17,15 @@ const {
   prevTrack,
   togglePlayPause,
   seek,
+  playMode,
   setPlayMode,
 } = useAudioPlayer()
 
 const songDetail = inject<Ref<SongDetail | null>>('songDetail')
+const handleCoverError = (event: Event) => {
+  const image = event.target as HTMLImageElement
+  if (image.src !== defaultAlbum) image.src = defaultAlbum
+}
 
 // 添加播放模式相关逻辑
 const playModes = {
@@ -43,13 +49,10 @@ const playModes = {
     next: 'order',
     tooltip: '单曲循环',
   },
-}
-
-const currentMode = ref('order')
+} as const
 
 const togglePlayMode = () => {
-  const nextMode = playModes[currentMode.value].next
-  currentMode.value = nextMode
+  const nextMode = playModes[playMode.value].next
   setPlayMode(nextMode)
 }
 </script>
@@ -62,12 +65,12 @@ const togglePlayMode = () => {
       <!-- 封面 -->
       <div :class="` ${isPlaying ? 'is-playing' : ''}`">
         <div class="album">
-          <div
+          <img
             class="album-art rounded-md"
-            :style="{
-              backgroundImage: `url(${songDetail?.coverUrl || currentTrack.cover})`,
-            }"
-          ></div>
+            :src="songDetail?.coverUrl || currentTrack.cover || defaultAlbum"
+            :alt="songDetail?.songName || currentTrack.title"
+            @error="handleCoverError"
+          />
           <div
             class="vinyl"
             :style="{
@@ -107,12 +110,12 @@ const togglePlayMode = () => {
       </div>
       <div class="flex items-center justify-center gap-14 w-2/4 mt-12">
         <el-tooltip
-          :content="playModes[currentMode].tooltip"
+          :content="playModes[playMode].tooltip"
           placement="top"
           effect="dark"
         >
           <el-button text circle @click="togglePlayMode">
-            <Icon :icon="playModes[currentMode].icon" class="text-2xl" />
+            <Icon :icon="playModes[playMode].icon" class="text-2xl" />
           </el-button>
         </el-tooltip>
         <el-button text circle class="!p-3" @click="prevTrack">
@@ -151,9 +154,7 @@ const togglePlayMode = () => {
 }
 
 .album-art {
-  background-position: center;
-  background-size: cover;
-  background-repeat: no-repeat;
+  object-fit: cover;
   height: 315px;
   position: relative;
   width: 325px;

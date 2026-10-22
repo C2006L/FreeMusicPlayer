@@ -3,19 +3,25 @@ import { defaultSong } from '@/mock'
 import { ElNotification } from 'element-plus'
 import { PlayMode } from './interface'
 import { urlV1 } from '@/api'
+import { searchOnlineSongs } from '@/api/system'
 interface AudioPlayer {
   isPlaying: Ref<boolean>
   currentTrack: ComputedRef<trackModel>
   currentTime: Ref<number>
   duration: Ref<number>
+  seekingTime: Ref<number>
+  isSeeking: Ref<boolean>
   volume: Ref<number>
+  playMode: Ref<PlayMode>
   //   currentLyricIndex: Ref<number>
   audioElement: Ref<HTMLAudioElement | null>
-  play: () => void
+  play: () => Promise<void>
   pause: () => void
   nextTrack: () => void
   prevTrack: () => void
   seek: (time: number) => void
+  startSeeking: () => void
+  previewSeek: (time: number) => void
   togglePlayPause: () => void
   setVolume: (volume: number) => void
   setPlayMode: (mode: PlayMode) => void
@@ -26,8 +32,8 @@ export const AudioPlayer = () => {
   const audioStore = AudioStore()
   const audioElement = ref<HTMLAudioElement | null>(null)
   const isPlaying = ref(false)
-  const volume = ref()
-  const playMode = ref<PlayMode>('order') // 默认为顺序播放
+  const volume = ref(audioStore.volume || 50)
+  const playMode = ref<PlayMode>(audioStore.playMode || 'order')
 
   // 当前播放的歌曲
   const currentTrack = computed<trackModel>(
@@ -35,6 +41,27 @@ export const AudioPlayer = () => {
   )
   const currentTime = ref(0)
   const duration = ref(0)
+  const seekingTime = ref(0)
+  const isSeeking = ref(false)
+  const fallbackAttempts = new Map<string, Set<string>>()
+  let fallbackInProgress = false
+
+  const onlineSources = [
+    'netease', 'qq', 'kugou', 'kuwo', 'migu', 'qianqian',
+    'jamendo', 'bilibili', 'fivesing', 'joox', 'baidu',
+  ]
+
+  const normalizeText = (value: string) =>
+    value.toLocaleLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '')
+
+  const trackKey = (track: trackModel) =>
+    `${normalizeText(track.title)}::${normalizeText(track.artist)}`
+
+  const getSource = (track: trackModel) =>
+    track.source || track.id.match(/^online:([^:]+):/)?.[1] || ''
+
+  const isOnlineTrack = (track: trackModel) =>
+    Boolean(track.online || track.source || track.id.startsWith('online:'))
 
   //   // 用于追踪当前歌词索引
   //   const currentLyricIndex = ref(0)
@@ -55,18 +82,42 @@ export const AudioPlayer = () => {
   //   }
 
   // 播放音乐
-  const play = () => {
-    if (audioElement.value) {
-      audioElement.value.play()
-      isPlaying.value = true
+  const play = async () => {
+    if (!audioElement.value || !currentTrack.value.url) return
+    try {
+      await audioElement.value.play()
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'NotAllowedError') {
+        ElNotification({
+          title: '浏览器已阻止自动播放',
+          message: '请再次点击播放按钮。',
+          type: 'info',
+        })
+        return
+      }
+      await handlePlaybackFailure('当前音源无法播放')
     }
   }
   // 跳转到指定时间
   const seek = (time: number) => {
     if (audioElement.value) {
-      audioElement.value.currentTime = time
-      currentTime.value = time
+      const safeDuration = Number.isFinite(duration.value) ? duration.value : 0
+      const target = Math.min(Math.max(Number(time) || 0, 0), safeDuration)
+      audioElement.value.currentTime = target
+      currentTime.value = target
+      seekingTime.value = target
+      isSeeking.value = false
     }
+  }
+
+  const startSeeking = () => {
+    isSeeking.value = true
+    seekingTime.value = currentTime.value
+  }
+
+  const previewSeek = (time: number) => {
+    isSeeking.value = true
+    seekingTime.value = Number(time) || 0
   }
   // 暂停音乐
   const pause = () => {
@@ -78,6 +129,7 @@ export const AudioPlayer = () => {
 
   // 播放下一首
   const nextTrack = async () => {
+    if (!audioStore.trackList.length) return
     switch (playMode.value) {
       case 'loop':
         if (audioStore.currentSongIndex < audioStore.trackList.length - 1) {
@@ -104,11 +156,12 @@ export const AudioPlayer = () => {
         break
     }
     await loadTrack()
-    play()
+    await play()
   }
 
   // 播放上一首
   const prevTrack = async () => {
+    if (!audioStore.trackList.length) return
     switch (playMode.value) {
       case 'loop':
         if (audioStore.currentSongIndex > 0) {
@@ -135,7 +188,7 @@ export const AudioPlayer = () => {
         break
     }
     await loadTrack()
-    play()
+    await play()
   }
 
   // 加载当前歌曲
@@ -146,6 +199,13 @@ export const AudioPlayer = () => {
     // checkLyrics()
 
     if (audioElement.value) {
+      audioElement.value.pause()
+      currentTime.value = 0
+      seekingTime.value = 0
+      const expectedDuration = Number(currentTrack.value.duration)
+      duration.value = Number.isFinite(expectedDuration) && expectedDuration > 0
+        ? expectedDuration
+        : 0
       audioElement.value.src = currentTrack.value.url
       audioElement.value.load()
     }
@@ -192,16 +252,142 @@ export const AudioPlayer = () => {
   // 更新当前播放时间
   const updateTime = () => {
     if (audioElement.value) {
-      currentTime.value = audioElement.value.currentTime
+      const nextTime = Number.isFinite(audioElement.value.currentTime)
+        ? audioElement.value.currentTime
+        : 0
+      currentTime.value = nextTime
+      if (!isSeeking.value) seekingTime.value = nextTime
     }
   }
 
   // 更新总时长
-  const onLoadedMetadata = () => {
-    if (audioElement.value) {
-      duration.value = audioElement.value.duration
+  const onLoadedMetadata = async () => {
+    if (!audioElement.value) return
+    const mediaDuration = audioElement.value.duration
+    if (!Number.isFinite(mediaDuration) || mediaDuration <= 0) return
+
+    const expectedDuration = Number(currentTrack.value.duration) || 0
+    duration.value = mediaDuration
+
+    const looksLikePreview = mediaDuration >= 25 && mediaDuration <= 32
+      && (expectedDuration === 0 || expectedDuration > mediaDuration + 15)
+    if (!looksLikePreview || !isOnlineTrack(currentTrack.value)) {
+      if (!expectedDuration) currentTrack.value.duration = mediaDuration
+      currentTrack.value.playbackStatus = undefined
+      return
+    }
+
+    const shouldResume = !audioElement.value.paused
+    audioElement.value.pause()
+    await tryAlternative('检测到约 30 秒的试听音源', shouldResume)
+  }
+
+  const matchesTrack = (candidate: any, track: trackModel) => {
+    const sameTitle = normalizeText(candidate.songName || '') === normalizeText(track.title)
+    const candidateArtist = normalizeText(candidate.artistName || '')
+    const primaryArtist = normalizeText(track.artist.split(/[,，/&、]/)[0] || '')
+    const expectedDuration = Number(track.duration) || 0
+    const candidateDuration = Number(candidate.duration) || 0
+    const durationMatches = !expectedDuration || !candidateDuration
+      || Math.abs(expectedDuration - candidateDuration) <= Math.max(8, expectedDuration * 0.05)
+    // A VIP marker is informational: the user's own Cookie may still grant
+    // access. Only confirmed unavailable resources are skipped before loading.
+    const usable = candidate.availability !== 'unavailable'
+    return usable && sameTitle && Boolean(primaryArtist)
+      && candidateArtist.includes(primaryArtist) && durationMatches
+  }
+
+  const tryAlternative = async (reason: string, resumePlayback = true) => {
+    const track = currentTrack.value
+    if (fallbackInProgress || !isOnlineTrack(track)) return false
+
+    fallbackInProgress = true
+    const originalKey = trackKey(track)
+    const originalIndex = audioStore.currentSongIndex
+    const attempts = fallbackAttempts.get(originalKey) || new Set<string>()
+    const currentSource = getSource(track)
+    if (currentSource) attempts.add(currentSource)
+    fallbackAttempts.set(originalKey, attempts)
+    track.playbackStatus = 'switching'
+
+    try {
+      const remainingSources = onlineSources.filter((source) => !attempts.has(source))
+      if (remainingSources.length) {
+        // 多个平台由后端并行查询，避免逐个平台等待超时。
+        const result = await searchOnlineSongs(`${track.title} ${track.artist}`, remainingSources)
+        const candidates = Array.isArray(result.data) ? result.data : []
+        const candidate = candidates.find((item: any) =>
+          !attempts.has(item.source) && matchesTrack(item, track)
+        )
+        if (candidate) {
+          attempts.add(candidate.source)
+          if (audioStore.currentSongIndex !== originalIndex || trackKey(currentTrack.value) !== originalKey) {
+            track.playbackStatus = undefined
+            return false
+          }
+          Object.assign(audioStore.trackList[originalIndex], {
+            id: String(candidate.songId),
+            title: candidate.songName,
+            artist: candidate.artistName,
+            album: candidate.album,
+            cover: candidate.coverUrl || track.cover,
+            url: candidate.audioUrl,
+            duration: Number(candidate.duration) || 0,
+            source: candidate.source,
+            sourceName: candidate.sourceName,
+            sourceSongId: candidate.sourceSongId,
+            sourceUrlId: candidate.sourceUrlId,
+            sourcePicId: candidate.sourcePicId,
+            sourceLyricId: candidate.sourceLyricId,
+            sourceExtra: candidate.sourceExtra,
+            providerEngine: candidate.providerEngine,
+            availability: candidate.availability,
+            vip: candidate.vip,
+            online: true,
+            playbackStatus: undefined,
+          })
+          await loadTrack()
+          ElNotification({
+            title: '已自动切换音源',
+            message: `${reason}，已改用 ${candidate.sourceName || candidate.source}`,
+            type: 'info',
+          })
+          // 允许新音源的 metadata 事件继续判定它是否仍是 30 秒试听。
+          fallbackInProgress = false
+          if (resumePlayback) await play()
+          return true
+        }
+        remainingSources.forEach((source) => attempts.add(source))
+      }
+
+      track.playbackStatus = reason.includes('30 秒') ? 'preview' : undefined
+      ElNotification({
+        title: reason.includes('30 秒') ? '该歌曲仅提供试听' : '播放失败',
+        message: '已检查其他平台，暂未找到可正常播放的同一首歌曲。',
+        type: 'warning',
+      })
+      return false
+    } catch {
+      track.playbackStatus = reason.includes('30 秒') ? 'preview' : undefined
+      ElNotification({
+        title: '切换音源失败',
+        message: '在线音源服务暂时无法连接，请稍后重试。',
+        type: 'warning',
+      })
+      return false
+    } finally {
+      fallbackInProgress = false
     }
   }
+
+  const handlePlaybackFailure = async (reason = '当前音源无法播放') => {
+    isPlaying.value = false
+    await tryAlternative(reason, true)
+  }
+
+  const onPlay = () => { isPlaying.value = true }
+  const onPause = () => { isPlaying.value = false }
+  const onPlaybackError = () => { void handlePlaybackFailure() }
 
   // 切换播放/暂停状态
   const togglePlayPause = () => {
@@ -224,6 +410,7 @@ export const AudioPlayer = () => {
   // 设置播放模式
   const setPlayMode = (mode: PlayMode) => {
     playMode.value = mode
+    audioStore.setAudioStore('playMode', mode)
     const modeText = {
       order: '顺序播放',
       shuffle: '随机播放',
@@ -253,6 +440,9 @@ export const AudioPlayer = () => {
     audioElement.value.addEventListener('timeupdate', updateTime)
     audioElement.value.addEventListener('ended', nextTrack)
     audioElement.value.addEventListener('loadedmetadata', onLoadedMetadata)
+    audioElement.value.addEventListener('play', onPlay)
+    audioElement.value.addEventListener('pause', onPause)
+    audioElement.value.addEventListener('error', onPlaybackError)
   })
 
   // 组件卸载时移除事件监听器
@@ -261,6 +451,9 @@ export const AudioPlayer = () => {
       audioElement.value.removeEventListener('timeupdate', updateTime)
       audioElement.value.removeEventListener('ended', nextTrack)
       audioElement.value.removeEventListener('loadedmetadata', onLoadedMetadata)
+      audioElement.value.removeEventListener('play', onPlay)
+      audioElement.value.removeEventListener('pause', onPause)
+      audioElement.value.removeEventListener('error', onPlaybackError)
     }
   })
 
@@ -269,7 +462,10 @@ export const AudioPlayer = () => {
     currentTrack,
     currentTime,
     duration,
+    seekingTime,
+    isSeeking,
     volume,
+    playMode,
     // currentLyricIndex,
     audioElement,
     play,
@@ -277,6 +473,8 @@ export const AudioPlayer = () => {
     nextTrack,
     prevTrack,
     seek,
+    startSeeking,
+    previewSeek,
     togglePlayPause,
     setVolume,
     setPlayMode,

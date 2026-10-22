@@ -1,9 +1,9 @@
 {
-  "name": "vibe-music-client",
+  "name": "free-music-player-client",
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Vibe Music",
+  "description": "FreeMusicPlayer web client",
   "author": {
     "name": "Alex LiSun",
     "email": "vibe_music_service@163.com"

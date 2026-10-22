@@ -1,12 +1,18 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue'
 import Recently from './recently.vue'
-const { volume, setVolume, setPlayMode } = useAudioPlayer()
+const { volume, playMode, setVolume, setPlayMode } = useAudioPlayer()
 
 const isMuted = computed(() => volume.value === 0)
+const volumeBeforeMute = ref(50)
 
 const toggleVolume = () => {
-  setVolume(isMuted.value ? 0.5 : 0)
+  if (isMuted.value) {
+    setVolume(volumeBeforeMute.value || 50)
+    return
+  }
+  volumeBeforeMute.value = volume.value
+  setVolume(0)
 }
 
 // 添加播放模式相关逻辑
@@ -31,34 +37,33 @@ const playModes = {
     next: 'order',
     tooltip: '单曲循环',
   },
-}
-
-const currentMode = ref('order')
+} as const
 
 const togglePlayMode = () => {
-  const nextMode = playModes[currentMode.value].next
-  currentMode.value = nextMode
+  const nextMode = playModes[playMode.value].next
   setPlayMode(nextMode)
 }
 </script>
 <template>
-  <div class="flex items-center pr-4">
+  <div class="player-tools flex items-center justify-end pr-4">
     <div class="flex items-center mx-4">
       <el-tooltip
-        :content="playModes[currentMode].tooltip"
+        :content="playModes[playMode].tooltip"
         placement="top"
         effect="dark"
       >
         <button
           class="p-2 rounded-full hover:bg-hoverMenuBg hover:text-primary transition-all duration-200 hover:scale-110 active:scale-95 w-9 h-9"
           @click="togglePlayMode"
+          aria-label="切换播放模式"
         >
-          <Icon :icon="playModes[currentMode].icon" class="w-full h-full" />
+          <Icon :icon="playModes[playMode].icon" class="w-full h-full" />
         </button>
       </el-tooltip>
     </div>
     <button
       @click="toggleVolume"
+      :aria-label="isMuted ? '恢复音量' : '静音'"
       class="p-2 rounded-full hover:bg-hoverMenuBg hover:text-primary transition-all duration-200 hover:scale-110 active:scale-95 w-9 h-9"
     >
       <Icon
@@ -70,7 +75,7 @@ const togglePlayMode = () => {
       v-model="volume"
       :show-tooltip="false"
       @change="setVolume"
-      class="!w-24 mr-4"
+      class="mr-4 !w-24 max-[900px]:hidden"
       size="small"
       :max="100"
     />

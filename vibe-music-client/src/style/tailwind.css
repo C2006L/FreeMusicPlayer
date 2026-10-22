@@ -4,9 +4,8 @@
 
 @layer base {
   :root {
-    /* 纸感底色：暖米白 */
-    --theme-bg-color: 38 33% 96% / 100%;
-    --dm-background: 38 33% 96% / 96%;
+    --theme-bg-color: 36 29% 96% / 100%;
+    --dm-background: 36 29% 96% / 96%;
 
     --background: 38 33% 96%;
     --foreground: 30 12% 12%;
@@ -33,7 +32,7 @@
     --active-menu-bg: 9, 100%, 59%, 12%;
 
     /* 点缀色：珊瑚橙红 */
-    --primary: #ff4d2e;
+    --primary: #ef6f52;
     --primary-foreground: 30 12% 12%;
 
     --secondary: 36 20% 93%;
@@ -45,39 +44,39 @@
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
 
-    --ring: 9 100% 59%;
+    --ring: 12 82% 63%;
 
     --radius: 0.625rem;
   }
 
   .dark {
-    --theme-bg-color: 222 25% 8% / 100%;
-    --dm-background: 222 25% 8% / 95%;
+    --theme-bg-color: 225 13% 7% / 100%;
+    --dm-background: 225 13% 7% / 97%;
 
-    --background: 222 25% 8%;
-    --foreground: 210 40% 98%;
+    --background: 225 13% 7%;
+    --foreground: 36 18% 94%;
 
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
+    --muted: 220 10% 14%;
+    --muted-foreground: 220 7% 62%;
 
-    --popover: 222.2 47.4% 11.2%;
-    --popover-foreground: 210 40% 98%;
+    --popover: 220 11% 10%;
+    --popover-foreground: 36 18% 94%;
 
     --inactive: 227 12% 50% / 78%;
 
     --heroui-default: 240 5.26% 26.08%;
     --bg-content1: 240 5.88% 10%;
 
-    --hover-menu-bg: 222, 36%, 80%, 30%;
-    --active-menu-bg: 9, 100%, 59%, 25%;
+    --hover-menu-bg: 220, 10%, 22%, 55%;
+    --active-menu-bg: 12, 82%, 63%, 12%;
 
-    --card: rgb(146 151 179 / 13%);
+    --card: #15171b;
     --card-foreground: 210 40% 98%;
 
-    --border: 227 12% 50% / 25%;
-    --input: 217.2 32.6% 17.5%;
+    --border: 220 8% 48% / 18%;
+    --input: 220 10% 14%;
 
-    --primary: #ff4d2e;
+    --primary: #ef6f52;
     --primary-foreground: 210 40% 98%;
 
     --secondary: 217.2 32.6% 17.5%;
@@ -89,7 +88,7 @@
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 210 40% 98%;
 
-    --ring: 9 100% 59%;
+    --ring: 12 82% 63%;
   }
 }
 

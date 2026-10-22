@@ -1,9 +1,17 @@
+<script setup lang="ts">
+const visible = ref(true)
+onMounted(() => {
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  window.setTimeout(() => { visible.value = false }, reduceMotion ? 150 : 950)
+})
+</script>
+
 <template>
-  <div class="splash-screen">
+  <div v-if="visible" class="splash-screen">
     <div class="flex flex-col items-center">
       <img src="/logo.svg" alt="logo" class="splash-logo w-16 h-16" />
-      <h1 class="splash-title font-serif-display">Vibe Music</h1>
-      <p class="splash-tagline">LET THE MUSIC FLOW</p>
+      <h1 class="splash-title">FreeMusicPlayer</h1>
+      <p class="splash-tagline">LISTEN ON YOUR TERMS</p>
     </div>
   </div>
 </template>
@@ -17,9 +25,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: #faf7f2;
+  background-color: #0e0f12;
   pointer-events: none;
-  animation: splash-out 0.5s cubic-bezier(0.22, 0.61, 0.36, 1) 1.6s forwards;
+  animation: splash-out 0.3s cubic-bezier(0.22, 0.61, 0.36, 1) 0.65s forwards;
 }
 
 .splash-logo {
@@ -31,7 +39,7 @@
   font-size: 44px;
   font-weight: 700;
   letter-spacing: -0.02em;
-  color: #26221c;
+  color: #f2eee8;
   animation: splash-rise 0.6s cubic-bezier(0.22, 0.61, 0.36, 1) 0.3s both;
 }
 

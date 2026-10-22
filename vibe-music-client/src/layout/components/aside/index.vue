@@ -40,10 +40,10 @@ watch(
 
 <template>
   <aside
-    class="w-64 hidden h-full overflow-hidden md:block border-r border-border"
+    class="app-sidebar hidden h-full overflow-hidden border-r border-border md:block"
   >
     <nav
-      class="menu-nav flex flex-col p-4 space-y-5 flex-1 h-full box-border overflow-hidden"
+      class="menu-nav box-border flex h-full flex-1 flex-col gap-6 overflow-hidden px-3 py-5"
     >
       <div
         v-for="(item, index) in MenuData"
@@ -51,14 +51,14 @@ watch(
         class="menu-section w-full flex flex-col gap-1"
       >
         <h3
-          class="menu-section-title ml-4 text-xs font-semibold tracking-widest text-muted-foreground"
+          class="menu-section-title px-3 text-[10px] font-semibold tracking-[0.18em] text-muted-foreground"
         >
           {{ item.title }}
         </h3>
         <div
           v-for="(item2, index2) in item.children"
           :key="index2"
-          class="menu-item mx-2 rounded-lg transition-all text-base duration-300 py-2 px-3 flex items-center gap-2.5 text-primary-foreground cursor-pointer"
+          class="menu-item flex cursor-pointer items-center gap-3 rounded-md px-3 py-2.5 text-sm text-foreground transition-colors"
           :class="{
             'is-active bg-activeMenuBg': route.path === item2.router,
             'hover:bg-hoverMenuBg': route.path !== item2.router,
@@ -80,7 +80,7 @@ watch(
         <h3
           class="menu-section-title ml-4 text-xs font-semibold tracking-widest text-muted-foreground"
         >
-          收藏的歌单（{{ favoriteStore.favoritePlaylists.length }}）
+          收藏歌单 · {{ favoriteStore.favoritePlaylists.length }}
         </h3>
         <el-scrollbar>
           <el-skeleton
@@ -104,7 +104,7 @@ watch(
             <div
               v-for="item in favoriteStore.favoritePlaylists"
               :key="item.id"
-              class="mx-2 my-1 rounded-lg transition text-sm duration-300 py-2 px-2 flex items-center gap-2 text-primary-foreground cursor-pointer"
+              class="playlist-link my-1 flex cursor-pointer items-center gap-2.5 rounded-md px-3 py-2 text-sm text-foreground transition-colors"
               :class="{
                 'bg-activeMenuBg': route.path === `/playlist/${item.id}`,
                 'hover:bg-hoverMenuBg': route.path !== `/playlist/${item.id}`,
@@ -137,6 +137,8 @@ watch(
 .menu-nav {
   counter-reset: menu-section;
 }
+
+.app-sidebar { width: var(--app-sidebar-width); flex: 0 0 var(--app-sidebar-width); background: hsl(var(--background)); }
 
 .menu-section {
   counter-increment: menu-section;
@@ -183,6 +185,9 @@ watch(
   font-weight: 600;
 }
 
+.menu-item:hover,
+.playlist-link:hover { color: hsl(var(--foreground)); }
+
 // 选中项左侧珊瑚指示条
 .menu-item.is-active::before {
   content: '';
@@ -194,5 +199,15 @@ watch(
   height: 18px;
   border-radius: 3px;
   background: var(--primary);
+}
+
+@media (max-width: 960px) {
+  .menu-section-title { width: 100%; overflow: hidden; white-space: nowrap; color: transparent; }
+  .menu-section-title::before { color: hsl(var(--muted-foreground)); }
+  .menu-section-title::after { display: none; }
+  .menu-item { justify-content: center; padding-inline: 0; }
+  .menu-item span, .playlist-link .flex-1 { display: none; }
+  .menu-item :deep(svg) { width: 21px; height: 21px; }
+  .playlist-link { justify-content: center; padding-inline: 0; }
 }
 </style>

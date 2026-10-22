@@ -77,7 +77,8 @@ public class ArtistServiceImpl extends ServiceImpl<ArtistMapper, Artist> impleme
     public Result<PageResult<ArtistVO>> getAllArtists(ArtistDTO artistDTO) {
         // 分页查询
         Page<Artist> page = new Page<>(artistDTO.getPageNum(), artistDTO.getPageSize());
-        QueryWrapper<Artist> queryWrapper = new QueryWrapper<>();
+        QueryWrapper<Artist> queryWrapper = new QueryWrapper<Artist>()
+                .exists("SELECT 1 FROM tb_song s WHERE s.artist_id = tb_artist.id AND s.media_status = 'active'");
         // 根据 artistDTO 的条件构建查询条件
         if (artistDTO.getArtistName() != null) {
             queryWrapper.like("name", artistDTO.getArtistName());

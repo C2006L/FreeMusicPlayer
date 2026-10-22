@@ -1,3 +1,4 @@
+import type { Song } from '@/api/interface'
 // import { ParsedLyrics } from '@/utils/parsedLyrics'
 /* UserState */
 export interface UserState {
@@ -16,9 +17,10 @@ export interface userModel {
 export interface AudioState {
   trackList: trackModel[] // 歌曲缓存
   currentSongIndex: number // 当前播放歌曲索引
-  currentPageSongs: [] // 当前页面的歌曲列表
+  currentPageSongs: Song[] // 当前页面的歌曲列表
   volume: number // 音量
   quality: string // 音质
+  playMode: 'loop' | 'order' | 'shuffle' | 'single'
 }
 export interface trackModel {
   id: string // 歌曲id
@@ -29,6 +31,20 @@ export interface trackModel {
   url: string // 音频地址
   duration: number // 时长
   likeStatus: number
+  source?: string // 在线音源标识
+  sourceName?: string // 在线音源名称
+  sourceSongId?: string
+  sourceUrlId?: string
+  sourcePicId?: string
+  sourceLyricId?: string
+  sourceExtra?: string
+  providerEngine?: string
+  availability?: 'unknown' | 'full' | 'preview' | 'restricted' | 'unavailable'
+  vip?: boolean
+  online?: boolean
+  lyric?: string
+  translatedLyric?: string
+  playbackStatus?: 'switching' | 'preview' | 'error'
 //   lyrics?: ParsedLyrics // 歌词
 }
 

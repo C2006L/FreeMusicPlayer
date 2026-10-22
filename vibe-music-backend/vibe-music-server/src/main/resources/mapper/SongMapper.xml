@@ -45,6 +45,7 @@
                  LEFT JOIN tb_comment c ON s.id = c.song_id AND c.type = 0
                  LEFT JOIN tb_user u ON c.user_id = u.id
         WHERE s.id = #{songId}
+          AND s.media_status = 'active'
     </select>
 
     <!-- 根据歌曲id列表查询歌曲列表 -->
@@ -56,6 +57,14 @@
         s.duration,
         s.cover_url AS coverUrl,
         s.audio_url AS audioUrl,
+        s.source,
+        s.source_song_id AS sourceSongId,
+        s.source_url_id AS sourceUrlId,
+        s.source_pic_id AS sourcePicId,
+        s.source_extra AS sourceExtra,
+        s.provider_engine AS providerEngine,
+        s.media_status AS mediaStatus,
+        (s.source NOT IN ('local', 'legacy-local')) AS online,
         s.release_time AS releaseTime,
         a.name AS artistName
         FROM tb_song s
@@ -63,7 +72,8 @@
         LEFT JOIN tb_user_favorite u ON s.id = u.song_id
         WHERE
         <if test="songIds != null and songIds.size() > 0">
-            s.id IN
+            s.media_status = 'active'
+            AND s.id IN
             <foreach collection="songIds" item="id" open="(" separator="," close=")">
                 #{id}
             </foreach>
@@ -99,7 +109,8 @@
         JOIN tb_genre g ON s.id = g.song_id
         JOIN tb_style st ON g.style_id = st.id
         LEFT JOIN tb_artist a ON s.artist_id = a.id
-        WHERE g.style_id IN
+        WHERE s.media_status = 'active'
+        AND g.style_id IN
         <foreach item="item" collection="sortedStyleIds" open="(" separator="," close=")">
             #{item}
         </foreach>

@@ -17,6 +17,7 @@ export const AudioStore = defineStore({
     volume: 50,
     // 音质
     quality: 'exhigh',
+    playMode: 'order',
     currentPageSongs: [], // 当前页面的歌曲列表
   }),
   actions: {
@@ -53,7 +54,7 @@ export const AudioStore = defineStore({
     // 设置当前页面的歌曲列表
     setCurrentPageSongs(songs: Song[]) {
       this.currentPageSongs = songs
-    }
+    },
   },
   persist: piniaPersistConfig('AudioStore'),
 })

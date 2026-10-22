@@ -6,6 +6,7 @@ import com.vibemusic.enumeration.LikeStatusEnum;
 import com.vibemusic.enumeration.RoleEnum;
 import com.vibemusic.mapper.*;
 import com.vibemusic.model.dto.SongAddDTO;
+import com.vibemusic.model.dto.OnlineSongImportDTO;
 import com.vibemusic.model.dto.SongAndArtistDTO;
 import com.vibemusic.model.dto.SongDTO;
 import com.vibemusic.model.dto.SongUpdateDTO;
@@ -57,6 +58,8 @@ public class SongServiceImpl extends ServiceImpl<SongMapper, Song> implements IS
     @Resource
     private SongMapper songMapper;
     @Resource
+    private ArtistMapper artistMapper;
+    @Resource
     private UserFavoriteMapper userFavoriteMapper;
     @Resource
     private StyleMapper styleMapper;
@@ -70,6 +73,73 @@ public class SongServiceImpl extends ServiceImpl<SongMapper, Song> implements IS
     private PlaylistBindingMapper playlistBindingMapper;
     @Resource
     private CommentMapper commentMapper;
+    @Resource
+    private com.vibemusic.service.OnlineMusicService onlineMusicService;
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    @CacheEvict(cacheNames = "songCache", allEntries = true)
+    public Result<Long> importOnlineSong(OnlineSongImportDTO dto) {
+        Song existing = songMapper.selectOne(new QueryWrapper<Song>()
+                .eq("source", dto.getSource())
+                .eq("source_song_id", dto.getSourceSongId())
+                .last("LIMIT 1"));
+        if (existing != null) {
+            existing.setSongName(dto.getSongName())
+                    .setAlbum(defaultText(dto.getAlbum(), "未知专辑"))
+                    .setDuration(dto.getDuration() == null ? null : String.valueOf(dto.getDuration()))
+                    .setSourceUrlId(defaultText(dto.getSourceUrlId(), dto.getSourceSongId()))
+                    .setSourcePicId(dto.getSourcePicId())
+                    .setSourceExtra(dto.getSourceExtra())
+                    .setProviderEngine(defaultText(dto.getProviderEngine(), "meting"))
+                    .setAudioUrl(onlineMusicService.buildStreamUrl(dto.getSource(),
+                            defaultText(dto.getSourceUrlId(), dto.getSourceSongId()), dto.getSongName(),
+                            dto.getArtistName(), dto.getAlbum(), dto.getDuration(), null,
+                            dto.getSourceExtra(), defaultText(dto.getProviderEngine(), "meting")))
+                    .setCoverUrl(dto.getSourcePicId() == null || dto.getSourcePicId().isBlank()
+                            ? null : onlineMusicService.buildCoverUrl(dto.getSource(), dto.getSourcePicId(),
+                            dto.getSongName(), dto.getArtistName(), null,
+                            defaultText(dto.getProviderEngine(), "meting")))
+                    .setMediaStatus("active");
+            songMapper.updateById(existing);
+            return Result.success(existing.getSongId());
+        }
+
+        Artist artist = artistMapper.selectOne(new QueryWrapper<Artist>()
+                .eq("name", dto.getArtistName())
+                .last("LIMIT 1"));
+        if (artist == null) {
+            artist = new Artist().setArtistName(dto.getArtistName());
+            artistMapper.insert(artist);
+        }
+
+        String urlId = defaultText(dto.getSourceUrlId(), dto.getSourceSongId());
+        Song song = new Song()
+                .setSource(dto.getSource())
+                .setSourceSongId(dto.getSourceSongId())
+                .setSourceUrlId(urlId)
+                .setSourcePicId(dto.getSourcePicId())
+                .setSourceExtra(dto.getSourceExtra())
+                .setProviderEngine(defaultText(dto.getProviderEngine(), "meting"))
+                .setMediaStatus("active")
+                .setArtistId(artist.getArtistId())
+                .setSongName(dto.getSongName())
+                .setAlbum(defaultText(dto.getAlbum(), "未知专辑"))
+                .setDuration(dto.getDuration() == null ? null : String.valueOf(dto.getDuration()))
+                .setCoverUrl(dto.getSourcePicId() == null || dto.getSourcePicId().isBlank()
+                        ? null : onlineMusicService.buildCoverUrl(dto.getSource(), dto.getSourcePicId(),
+                        dto.getSongName(), dto.getArtistName(), null,
+                        defaultText(dto.getProviderEngine(), "meting")))
+                .setAudioUrl(onlineMusicService.buildStreamUrl(dto.getSource(), urlId, dto.getSongName(),
+                        dto.getArtistName(), dto.getAlbum(), dto.getDuration(), null,
+                        dto.getSourceExtra(), defaultText(dto.getProviderEngine(), "meting")));
+        songMapper.insert(song);
+        return Result.success(song.getSongId());
+    }
+
+    private static String defaultText(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value;
+    }
     /**
      * 获取所有歌曲
      *
@@ -293,7 +363,7 @@ public class SongServiceImpl extends ServiceImpl<SongMapper, Song> implements IS
      */
     @Override
     public Result<Long> getAllSongsCount(String style) {
-        QueryWrapper<Song> queryWrapper = new QueryWrapper<>();
+        QueryWrapper<Song> queryWrapper = new QueryWrapper<Song>().eq("media_status", "active");
         if (style != null) {
             queryWrapper.like("style", style);
         }
@@ -421,7 +491,7 @@ public class SongServiceImpl extends ServiceImpl<SongMapper, Song> implements IS
     public Result updateSongCover(Long songId, String coverUrl) {
         Song song = songMapper.selectById(songId);
         String cover = song.getCoverUrl();
-        if (cover != null && !cover.isEmpty()) {
+        if (isMinioManaged(song) && cover != null && !cover.isEmpty()) {
             minioService.deleteFile(cover);
         }
 
@@ -446,7 +516,7 @@ public class SongServiceImpl extends ServiceImpl<SongMapper, Song> implements IS
 
         Song song = songMapper.selectById(songId);
         String audio = song.getAudioUrl();
-        if (audio != null && !audio.isEmpty()) {
+        if (isMinioManaged(song) && audio != null && !audio.isEmpty()) {
 
             minioService.deleteFile(audio);
         }
@@ -482,10 +552,10 @@ public class SongServiceImpl extends ServiceImpl<SongMapper, Song> implements IS
         // 删除 MinIO 里的歌曲封面和音频文件
         String cover = song.getCoverUrl();
         String audio = song.getAudioUrl();
-        if (cover != null && !cover.isEmpty()) {
+        if (isMinioManaged(song) && cover != null && !cover.isEmpty()) {
             minioService.deleteFile(cover);
         }
-        if (audio != null && !audio.isEmpty()) {
+        if (isMinioManaged(song) && audio != null && !audio.isEmpty()) {
             minioService.deleteFile(audio);
         }
 
@@ -529,10 +599,12 @@ public class SongServiceImpl extends ServiceImpl<SongMapper, Song> implements IS
         }
 
         List<String> coverUrlList = songs.stream()
+                .filter(SongServiceImpl::isMinioManaged)
                 .map(Song::getCoverUrl)
                 .filter(coverUrl -> coverUrl != null && !coverUrl.isEmpty())
                 .toList();
         List<String> audioUrlList = songs.stream()
+                .filter(SongServiceImpl::isMinioManaged)
                 .map(Song::getAudioUrl)
                 .filter(audioUrl -> audioUrl != null && !audioUrl.isEmpty())
                 .toList();
@@ -546,6 +618,10 @@ public class SongServiceImpl extends ServiceImpl<SongMapper, Song> implements IS
         }
 
         return Result.success(MessageConstant.DELETE + MessageConstant.SUCCESS);
+    }
+
+    private static boolean isMinioManaged(Song song) {
+        return song != null && "local".equals(song.getSource());
     }
 
 }

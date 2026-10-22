@@ -21,4 +21,4 @@ vibe-music:
       api-key: ${DASHSCOPE_API_KEY:not-configured}
   online:
     provider-url: http://127.0.0.1:3001
-    provider-public-url: http://127.0.0.1:3001
+    provider-public-url: http://127.0.0.1:8080/song

@@ -22,5 +22,13 @@ public class OnlineSongVO implements Serializable {
     private Integer likeStatus;
     private String source;
     private String sourceName;
+    private String sourceSongId;
+    private String sourceUrlId;
+    private String sourcePicId;
+    private String sourceLyricId;
+    private String sourceExtra;
+    private String providerEngine;
+    private String availability;
+    private Boolean vip;
     private Boolean online;
 }

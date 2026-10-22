@@ -11,7 +11,9 @@
 
 ## 项目简介
 
-FreeMusicPlayer 是一个前后端分离的音乐平台，包含用户端播放器、管理后台、Spring Boot API、在线音乐聚合服务和 AI 音乐助手。项目内置 499 条歌曲元数据，可连接 MinIO 中的本地媒体文件，也可以通过 Meting 聚合搜索网易云、QQ 音乐、酷狗、酷我和百度音乐。
+FreeMusicPlayer 是一个前后端分离的桌面风格音乐平台，包含用户端播放器、管理后台、Spring Boot API、多引擎在线音乐适配层和 AI 音乐助手。当前版本以在线发现和用户自己的音乐数据为主，不再把原项目中已经失效的示例媒体当作可用曲库。
+
+在线适配层默认使用独立部署的 `go-music-api` 完成多源搜索、流代理和音源元数据解析，并保留 Meting 作为兼容回退。当前可聚合网易云、QQ 音乐、酷狗、酷我、咪咕、千千、Jamendo、JOOX、Bilibili、5sing 等来源；实际结果由平台、地区、账号权益和接口状态决定。
 
 > 本仓库不包含受版权保护的原始音频与封面文件。在线歌曲能否搜索或播放取决于上游平台的版权、地区限制和接口可用性。
 
@@ -21,7 +23,9 @@ FreeMusicPlayer 是一个前后端分离的音乐平台，包含用户端播放�
 
 - 歌曲、歌手、歌单浏览与搜索
 - 播放队列、进度、音量、收藏、评论和下载
-- 网易云、QQ 音乐、酷狗、酷我、百度多音源聚合搜索
+- 多平台并发搜索、来源标识和相同歌曲多音源保留
+- 30 秒试听识别、播放失败自动换源和严格的歌名/歌手/时长匹配
+- 会员、试听、不可用状态提示，不把受限资源伪装成完整歌曲
 - 注册、登录、个人资料和头像管理
 - 基于收藏风格的歌曲推荐
 - 深色主题与响应式播放器界面
@@ -52,8 +56,9 @@ FreeMusicPlayer 是一个前后端分离的音乐平台，包含用户端播放�
 Spring Boot API :8080
   ├─ MySQL :13306      业务数据
   ├─ Redis :6379       会话与缓存
-  ├─ MinIO :9000       音频与图片
-  ├─ Provider :3001    多音源搜索与播放地址解析
+  ├─ Provider :3001    统一音源适配、排序与兼容回退
+  ├─ go-music-api :3002 多平台搜索、探测与流代理
+  ├─ MinIO :9000       可选的用户附件存储
   └─ DashScope         AI 对话与工具调用
 ```
 
@@ -65,9 +70,9 @@ FreeMusicPlayer/
 │   ├── vibe-music-server/      Spring Boot 主服务
 │   ├── vibe-music-model/       DTO、Entity、VO
 │   └── vibe-music-common/      公共常量、结果与工具
-├── vibe-music-provider/        基于 @meting/core 的在线音乐侧车
+├── vibe-music-provider/        go-music-api + Meting 多引擎适配侧车
 ├── sql/vibe_music.sql          数据库结构与初始化数据
-├── compose.dev.yml             MySQL、Redis、MinIO 开发环境
+├── compose.dev.yml             MySQL、Redis、go-music-api 和可选 MinIO
 ├── config/                     Docker 本地开发配置
 └── scripts/                    Windows 安装、启动和停止脚本
 ```
@@ -91,12 +96,18 @@ Maven Wrapper 和固定版本的 pnpm 会由脚本调用，无需全局单独安
 .\scripts\setup-dev.ps1
 ```
 
-依赖缓存、MySQL、Redis 和 MinIO 数据会尽量保存在项目的 `.runtime` 目录中；项目位于 D 盘时，这些可写数据也位于 D 盘。
+依赖缓存、MySQL、Redis 和可选的 MinIO 数据会尽量保存在项目的 `.runtime` 目录中；项目位于 D 盘时，这些可写数据也位于 D 盘。
 
 ### 启动
 
 ```powershell
 .\scripts\start-dev.ps1
+```
+
+默认启动 MySQL、Redis 和增强音源 API，歌曲通过在线 Provider 实时解析，不依赖 MinIO。首次启动需要下载 `go-music-api` 镜像。需要测试头像、封面或本地音频上传时再运行：
+
+```powershell
+.\scripts\start-dev.ps1 -WithMinio
 ```
 
 不需要管理端时：
@@ -112,10 +123,11 @@ Maven Wrapper 和固定版本的 pnpm 会由脚本调用，无需全局单独安
 | 用户端 | http://localhost:8090 |
 | 管理端 | http://localhost:8089 |
 | 后端 API | http://localhost:8080 |
-| MinIO 控制台 | http://localhost:9001 |
+| MinIO 控制台（仅 `-WithMinio`） | http://localhost:9001 |
 | 在线音乐 Provider | http://localhost:3001 |
+| 增强音源 API / Swagger | http://localhost:3002/swagger/index.html |
 
-MinIO 本地开发账号为 `minioadmin / minioadmin`。这些凭据仅用于本机开发环境，请勿直接用于公网部署。
+MinIO 本地开发账号为 `minioadmin / minioadmin`。MinIO 现在是可选的附件存储，只用于头像、封面及用户主动上传的媒体，不参与在线歌曲播放。这些凭据仅用于本机开发环境，请勿直接用于公网部署。
 
 ### 停止
 
@@ -151,10 +163,36 @@ AI 请求链路：
 3. 模型需要真实曲库信息时，会调用 `MusicAgentTools` 查询 MySQL。
 4. 后端把模型增量内容封装成 SSE 事件推送给浏览器。
 
+## 在线平台账号授权（可选）
+
+默认在线来源只能返回平台公开允许的内容；会员歌曲是否能够完整播放仍由对应平台、账号权益和地区规则决定。增强音源服务从 `.runtime/go-music-api/cookies.json` 读取你自己的 Cookie，例如：
+
+```json
+{
+  "netease": "MUSIC_U=...; __csrf=...;",
+  "qq": "qm_keyst=...; uin=...;",
+  "kugou": "token=...; userid=...;",
+  "bilibili": "SESSDATA=...;"
+}
+```
+
+修改后重启服务。该文件位于被 Git 忽略的 `.runtime` 目录，不要把 Cookie 写进源码、提交到 GitHub、截图或分享给其他人。Meting 回退仍支持 `MUSIC_COOKIE_NETEASE`、`MUSIC_COOKIE_TENCENT` 等环境变量。
+
+本项目不会绕过付费校验，也不保证未购买的 VIP 曲目可以完整播放。找不到完整来源时会显示试听/受限状态；请使用自己的合法账号权益、本地音乐或开放授权音乐。
+
+## 搜索与换源机制
+
+1. Provider 向多个来源并发搜索，每个来源默认最多保留 20 条，不再只取前 5 条。
+2. 只按“来源 + 平台歌曲 ID”去重，因此同一首歌在不同平台的版本会保留。
+3. 搜索结果按歌名和歌手相关度排序，并显示来源及平台给出的 VIP/无效标记。
+4. 点击播放后由后端代理真实媒体流，避免浏览器跨域和常见防盗链问题。
+5. 浏览器检测到约 30 秒、且明显短于标称时长的媒体时，会按歌名、主要歌手和时长误差自动寻找其他来源。
+6. 换源不会自动拿 Live、Remix 或翻唱冒充录音棚原版；所有来源均受限时会明确提示。
+
 ## 数据与媒体说明
 
-- SQL 初始化文件包含 499 条歌曲元数据，但不包含原始音频和封面。
-- 本地媒体文件需要上传到 MinIO 的 `vibe-music-data` 桶，并与数据库 URL 对应。
+- SQL 初始化文件中的旧示例歌曲只包含已丢失的地址，迁移后会标记为不可用；它们不是当前在线曲库。
+- MinIO 仅用于用户主动上传的本地媒体和附件；在线播放地址由后端实时解析并代理，不依赖 MinIO。
 - 页面出现灰色图片占位通常表示 MinIO 中缺少对应文件，不代表前端网络完全断开。
 - Redis、MySQL、MinIO 使用 D 盘目录绑定，因此不会以命名卷形式出现在 Docker Desktop 的 Volumes 页面。
 
@@ -191,14 +229,14 @@ docker compose -f compose.dev.yml ps
 | 数据 | MyBatis-Plus、MySQL 8、Druid、Redis 7 |
 | 文件存储 | MinIO / S3 兼容对象存储 |
 | AI | Spring AI、Spring AI Alibaba、DashScope |
-| 在线音乐 | Node.js、@meting/core |
+| 在线音乐 | Node.js、@meting/core、独立 go-music-api 服务 |
 
 ## 开源说明
 
 本项目基于 [Alex-LiSun/vibe-music-server](https://github.com/Alex-LiSun/vibe-music-server) 的 MIT 许可代码继续开发。
 
-- 在线多音源适配使用 MIT 许可的 [metowolf/Meting](https://github.com/metowolf/Meting)。
-- 聚合搜索的并发、失败隔离和去重设计参考 [guohuiyuan/go-music-dl](https://github.com/guohuiyuan/go-music-dl)，未复制其 AGPL-3.0 源码。
+- 在线兼容回退使用 MIT 许可的 [metowolf/Meting](https://github.com/metowolf/Meting)。
+- 增强音源能力通过独立运行的 [guohuiyuan/go-music-api](https://github.com/guohuiyuan/go-music-api) REST 服务接入。该服务采用 AGPL-3.0，本仓库不复制或重新许可其源码；分发或修改该服务时需单独遵守其许可证。
 - 管理端基于 [vue-pure-admin](https://github.com/pure-admin/vue-pure-admin)。
 
 项目代码按照仓库中的 MIT License 发布。使用第三方音乐平台内容时，请遵守当地法律、服务条款和版权要求。

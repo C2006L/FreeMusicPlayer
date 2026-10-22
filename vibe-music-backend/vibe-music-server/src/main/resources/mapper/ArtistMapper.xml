@@ -41,7 +41,7 @@
                s.audio_url    AS audioUrl,
                s.release_time AS releaseTime
         FROM tb_artist a
-                 LEFT JOIN tb_song s ON a.id = s.artist_id
+                 LEFT JOIN tb_song s ON a.id = s.artist_id AND s.media_status = 'active'
         WHERE a.id = #{artistId}
     </select>
 

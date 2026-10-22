@@ -196,7 +196,7 @@ watch(
           description: playlistData.introduction,
           coverImgUrl: playlistData.coverUrl || coverImg,
           creator: {
-            nickname: 'Vibe Music',
+            nickname: 'FreeMusicPlayer',
             avatarUrl: coverImg
           },
           trackCount: playlistData.songs.length,
@@ -223,7 +223,7 @@ const handlePlayAll = async () => {
     album: song.album,
     cover: song.coverUrl || coverImg,
     url: song.audioUrl,
-    duration: parseFloat(song.duration) * 1000,
+    duration: parseFloat(song.duration),
     likeStatus: song.likeStatus
   }))
 

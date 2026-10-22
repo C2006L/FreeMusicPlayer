@@ -68,7 +68,9 @@ public class PlaylistServiceImpl extends ServiceImpl<PlaylistMapper, Playlist> i
     public Result<PageResult<PlaylistVO>> getAllPlaylists(PlaylistDTO playlistDTO) {
         // 分页查询
         Page<Playlist> page = new Page<>(playlistDTO.getPageNum(), playlistDTO.getPageSize());
-        QueryWrapper<Playlist> queryWrapper = new QueryWrapper<>();
+        QueryWrapper<Playlist> queryWrapper = new QueryWrapper<Playlist>()
+                .exists("SELECT 1 FROM tb_playlist_binding pb JOIN tb_song s ON s.id = pb.song_id " +
+                        "WHERE pb.playlist_id = tb_playlist.id AND s.media_status = 'active'");
         // 根据 playlistDTO 的条件构建查询条件
         if (playlistDTO.getTitle() != null) {
             queryWrapper.like("title", playlistDTO.getTitle());

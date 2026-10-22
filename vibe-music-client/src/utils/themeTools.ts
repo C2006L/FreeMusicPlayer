@@ -45,7 +45,8 @@ export function getDarkColor(color: string, level: number): string | void {
     ElMessage.warning('输入错误的hex颜色值')
     return
   }
-  let rgb: number[] = hexToRgb(color)!
+  let rgb = hexToRgb(color)
+  if (!rgb) return
   rgb = rgb.map((c) => Math.floor(c * (1 - level)))
   return rgbToHex(rgb[0], rgb[1], rgb[2])
 }
@@ -62,7 +63,8 @@ export function getLightColor(color: string, level: number): string | void {
     ElMessage.warning('输入错误的hex颜色值')
     return
   }
-  let rgb: number[] = hexToRgb(color)!
+  let rgb = hexToRgb(color)
+  if (!rgb) return
   rgb = rgb.map((c) => Math.floor((255 - c) * level + c))
   return rgbToHex(rgb[0], rgb[1], rgb[2])
 }

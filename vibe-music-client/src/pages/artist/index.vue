@@ -2,6 +2,7 @@
 import { categories } from '@/utils/enum'
 import { getAllArtists } from '@/api/system'
 import { ElNotification } from 'element-plus'
+import defaultAvatar from '@/assets/user.jpg'
 
 const router = useRouter()
 const artistList = ref([])
@@ -65,7 +66,7 @@ const handleGetArtistList = () => {
       artistList.value = res.data.items.map(item => ({
         artistId: item.artistId,
         name: item.artistName,
-        picUrl: item.avatar,
+        picUrl: item.avatar || defaultAvatar,
         alias: []
       }))
       total.value = res.data.total
@@ -94,7 +95,7 @@ const handleSearch = () => {
       artistList.value = res.data.items.map(item => ({
         artistId: item.artistId,
         name: item.artistName,
-        picUrl: item.avatar,
+        picUrl: item.avatar || defaultAvatar,
         alias: []
       }))
       total.value = res.data.total

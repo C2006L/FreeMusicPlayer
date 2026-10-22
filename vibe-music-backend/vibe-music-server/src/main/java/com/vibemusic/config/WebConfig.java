@@ -21,9 +21,12 @@ public class WebConfig implements WebMvcConfigurer {
                         "/admin/login", "/admin/logout", "/admin/register",
                         "/user/login", "/user/logout", "/user/register",
                         "/user/sendVerificationCode", "/user/resetUserPassword",
+                        "/health",
                         "/banner/getBannerList",
                         "/playlist/getAllPlaylists", "/playlist/getRecommendedPlaylists", "/playlist/getPlaylistDetail/**",
                         "/artist/getAllArtists", "/artist/getArtistDetail/**",
-                        "/song/getAllSongs", "/song/getRecommendedSongs", "/song/getSongDetail/**");
+                        "/song/getAllSongs", "/song/getRecommendedSongs", "/song/getSongDetail/**",
+                        "/song/searchOnline", "/song/discoverOnline",
+                        "/song/streamOnline", "/song/coverOnline", "/song/lyricOnline");
     }
 }

@@ -21,7 +21,7 @@ provide('audioPlayer', AudioPlayer())
       </div>
       <Footer />
     </div>
-    <!-- 全局悬浮的 VibeAgent 聊天窗 -->
+    <!-- 全局悬浮的 FreeMusic Assistant 聊天窗 -->
     <AgentChat />
   </div>
 </template>

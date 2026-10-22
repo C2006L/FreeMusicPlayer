@@ -1,9 +1,9 @@
 {
-  "name": "vibe-music-provider",
+  "name": "free-music-player-provider",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Multi-source music search sidecar for Vibe Music",
+  "description": "Multi-source music search sidecar for FreeMusicPlayer",
   "scripts": {
     "start": "node server.mjs",
     "dev": "node --watch server.mjs"

@@ -13,6 +13,7 @@ export function getBrowserLang() {
 }
 
 export function formatTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return '00:00'
   // 将秒数转换为整数分钟数和剩余秒数
   const min = Math.floor(seconds / 60)
   const sec = Math.floor(seconds % 60)

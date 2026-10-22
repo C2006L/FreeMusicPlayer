@@ -137,7 +137,7 @@ const newConversation = () => {
   <button
     v-if="!open"
     class="fixed bottom-24 right-6 w-14 h-14 rounded-full bg-primary text-white shadow-lg shadow-primary/30 flex items-center justify-center transition-all duration-300 ease-spring hover:scale-110 hover:rotate-6 z-[100]"
-    aria-label="打开 VibeAgent"
+    aria-label="打开 FreeMusic Assistant"
     @click="open = true"
   >
     <Icon icon="mdi:robot-outline" class="text-2xl" />
@@ -165,7 +165,7 @@ const newConversation = () => {
         </div>
         <div class="leading-tight">
           <div class="font-serif-display font-bold tracking-tight">
-            VibeAgent
+            FreeMusic Assistant
           </div>
           <div class="text-xs text-muted-foreground">你的私人音乐向导</div>
         </div>
@@ -326,7 +326,7 @@ const newConversation = () => {
           </button>
         </div>
         <div class="text-[10px] text-muted-foreground/70 text-center mt-1.5">
-          VibeAgent 由通义千问驱动，推荐结果来自真实曲库
+          FreeMusic Assistant 由通义千问驱动，推荐结果来自真实曲库
         </div>
       </div>
     </div>

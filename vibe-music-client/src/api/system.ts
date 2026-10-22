@@ -95,11 +95,26 @@ export const getAllSongs = (data: object) => {
 }
 
 /** 聚合搜索在线曲库 */
-export const searchOnlineSongs = (keyword: string, sources?: string[]) => {
+export const searchOnlineSongs = (keyword: string, sources?: string[], limit = 20) => {
   return http<Result>('get', '/song/searchOnline', {
-    params: { keyword, sources, limit: 5 },
+    params: { keyword, sources, limit },
     paramsSerializer: { indexes: null },
   })
+}
+
+/** 首页在线推荐 */
+export const discoverOnlineSongs = (limit = 20) => {
+  return http<Result>('get', '/song/discoverOnline', { params: { limit } })
+}
+
+/** 获取在线歌曲 LRC 歌词 */
+export const getOnlineLyrics = (source: string, id: string, metadata: Record<string, unknown> = {}) => {
+  return http<Result>('get', '/song/lyricOnline', { params: { source, id, ...metadata } })
+}
+
+/** 登记在线歌曲，返回可供收藏/歌单关系使用的内部数字 ID */
+export const importOnlineSong = (song: object) => {
+  return http<Result>('post', '/song/importOnline', { data: song })
 }
 
 /** 获取歌曲详情 */

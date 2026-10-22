@@ -10,6 +10,7 @@ import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
@@ -26,10 +27,13 @@ public class AgentController {
 
 
     private final ChatClient chatClient;
+    private final boolean aiConfigured;
 
     public AgentController(ChatClient.Builder chatClientBuilder,
-                           MusicAgentTools musicAgentTools) {
+                           MusicAgentTools musicAgentTools,
+                           @Value("${vibe-music.ai.dashscope.api-key:not-configured}") String apiKey) {
         log.info("AgentController constructor");
+        this.aiConfigured = apiKey != null && !apiKey.isBlank() && !"not-configured".equals(apiKey);
         this.chatClient = chatClientBuilder
                 .defaultSystem(DEFAULT_PROMPT)
                 .defaultAdvisors(
@@ -60,6 +64,10 @@ public class AgentController {
         response.setHeader("X-Accel-Buffering", "no");
 
         SseEmitter emitter = new SseEmitter(0L);
+        if (!aiConfigured) {
+            sendTextAndComplete(emitter, "AI 音乐助手尚未配置。请先设置 DASHSCOPE_API_KEY，再重新启动后端。");
+            return emitter;
+        }
         Flux<String> content = this.chatClient.prompt(dto.getQuery())
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, dto.getConversationId())
                 ).stream().content();
@@ -82,7 +90,7 @@ public class AgentController {
                 },
                 error -> {
                     log.error("agent 对话流式输出失败", error);
-                    emitter.completeWithError(error);
+                    sendTextAndComplete(emitter, friendlyAiError(error));
                 },
                 emitter::complete
         );
@@ -93,8 +101,15 @@ public class AgentController {
      */
     @GetMapping("/simple/chat")
     public String simpleChat(@RequestParam(value = "query", defaultValue = "你好，很高兴认识你，能简单介绍一下自己吗？") String query) {
-
-        return chatClient.prompt(query).call().content();
+        if (!aiConfigured) {
+            return "AI 音乐助手尚未配置。请先设置 DASHSCOPE_API_KEY，再重新启动后端。";
+        }
+        try {
+            return chatClient.prompt(query).call().content();
+        } catch (Exception exception) {
+            log.error("agent 简单对话失败", exception);
+            return friendlyAiError(exception);
+        }
     }
 
     /**
@@ -109,7 +124,36 @@ public class AgentController {
         response.setHeader("X-Accel-Buffering", "no");
 
         SseEmitter emitter = new SseEmitter(0L);
+        if (!aiConfigured) {
+            sendTextAndComplete(emitter, "AI 音乐助手尚未配置。请先设置 DASHSCOPE_API_KEY，再重新启动后端。");
+            return emitter;
+        }
         streamToEmitter(chatClient.prompt(query).stream().content(), emitter);
         return emitter;
+    }
+
+    @GetMapping("/status")
+    public java.util.Map<String, Object> status() {
+        return java.util.Map.of(
+                "configured", aiConfigured,
+                "message", aiConfigured ? "AI 音乐助手已配置" : "缺少 DASHSCOPE_API_KEY"
+        );
+    }
+
+    private void sendTextAndComplete(SseEmitter emitter, String message) {
+        try {
+            emitter.send(SseEmitter.event().name("text").data(message));
+            emitter.complete();
+        } catch (IOException exception) {
+            emitter.completeWithError(exception);
+        }
+    }
+
+    private String friendlyAiError(Throwable error) {
+        String message = error == null ? "" : String.valueOf(error.getMessage());
+        if (message.contains("InvalidApiKey") || message.contains("401")) {
+            return "AI 服务密钥无效，请检查 DASHSCOPE_API_KEY 并重新启动后端。";
+        }
+        return "AI 服务暂时不可用，请稍后重试。在线搜索和歌曲播放不受影响。";
     }
 }

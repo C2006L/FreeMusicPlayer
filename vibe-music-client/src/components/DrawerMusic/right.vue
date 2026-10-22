@@ -11,6 +11,7 @@ import {
 } from '@/api/system'
 import { ElMessage } from 'element-plus'
 import { UserStore } from '@/stores/modules/user'
+import Lyrics from './lyrics.vue'
 
 const songDetail = inject<Ref<SongDetail | null>>('songDetail')
 const userStore = UserStore()
@@ -21,6 +22,14 @@ const currentUsername = computed(() => userStore.userInfo?.username || '')
 // 评论相关
 const commentContent = ref('')
 const maxLength = 180
+const activeTab = ref<'lyrics' | 'comments'>('lyrics')
+
+watch(
+  () => songDetail?.value?.songId,
+  (songId) => {
+    if (!songId) activeTab.value = 'lyrics'
+  },
+)
 
 // 对评论进行排序，最新的显示在前面
 const comments = computed(() => {
@@ -136,8 +145,18 @@ const handleDelete = async (comment: any) => {
 </script>
 
 <template>
-  <div class="h-full p-6 overflow-y-auto mr-16">
-    <div v-if="songDetail" class="space-y-6">
+  <div class="right-panel">
+    <nav v-if="songDetail" class="content-tabs" aria-label="歌曲内容">
+      <button :class="{ active: activeTab === 'lyrics' }" @click="activeTab = 'lyrics'">歌词</button>
+      <button :class="{ active: activeTab === 'comments' }" @click="activeTab = 'comments'">
+        评论 <span>{{ formatNumber(songDetail.comments?.length || 0) }}</span>
+      </button>
+    </nav>
+
+    <div v-show="activeTab === 'lyrics'" class="panel-content"><Lyrics /></div>
+
+    <div v-if="activeTab === 'comments' && songDetail" class="comments-panel">
+    <div class="space-y-6">
       <!-- 歌曲信息 -->
       <div class="space-y-2">
         <h3 class="text-xl font-semibold text-primary-foreground">歌曲信息</h3>
@@ -238,13 +257,17 @@ const handleDelete = async (comment: any) => {
         </div>
       </div>
     </div>
-    <div v-else class="flex items-center justify-center h-full">
-      <el-empty description="暂无歌曲信息" />
     </div>
   </div>
 </template>
 
 <style scoped>
+.right-panel { position:relative; display:flex; height:100%; min-height:0; flex-direction:column; overflow:hidden; }
+.content-tabs { position:absolute; top:19px; right:28px; z-index:2; display:flex; gap:4px; padding:3px; border:1px solid hsl(var(--border)); border-radius:7px; background:hsl(var(--background)); }
+.content-tabs button { min-width:64px; border-radius:4px; padding:5px 10px; color:hsl(var(--muted-foreground)); font-size:12px; transition:background .15s ease,color .15s ease; }
+.content-tabs button:hover { color:hsl(var(--foreground)); }.content-tabs button.active { background:hsl(var(--muted)); color:var(--primary); }
+.content-tabs span { margin-left:3px; font-size:10px; }
+.panel-content { min-height:0; flex:1; }.comments-panel { min-height:0; flex:1; overflow-y:auto; padding:80px 32px 32px; }
 .el-button {
   --el-button-hover-text-color: var(--el-color-primary);
   --el-button-hover-bg-color: transparent;
