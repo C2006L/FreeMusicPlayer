@@ -40,6 +40,7 @@ public class JwtUtil {
      */
     public static String generateToken(Map<String, Object> claims) {
         return JWT.create()
+                .withJWTId(java.util.UUID.randomUUID().toString())
                 .withClaim("claims", claims) // 自定义的业务数据
                 .withExpiresAt(new Date(System.currentTimeMillis() + expirationTime)) // 设置过期时间
                 .sign(algorithm()); // 使用 HMAC256 算法签名

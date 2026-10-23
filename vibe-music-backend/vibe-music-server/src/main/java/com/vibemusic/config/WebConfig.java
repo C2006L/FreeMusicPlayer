@@ -18,7 +18,7 @@ public class WebConfig implements WebMvcConfigurer {
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(authRateLimitInterceptor)
-                .addPathPatterns("/user/login", "/admin/login", "/user/sendVerificationCode")
+                .addPathPatterns("/user/login", "/admin/login", "/user/sendVerificationCode", "/user/register", "/user/resetUserPassword", "/agent/chat")
                 .order(0);
 
         // 登录接口和注册接口不拦截

@@ -34,6 +34,9 @@ public class AuthRateLimitInterceptor implements HandlerInterceptor {
         if ("/user/sendVerificationCode".equals(path)) {
             limit = 10;
             windowMinutes = 60;
+        } else if ("/agent/chat".equals(path)) {
+            limit = 20;
+            windowMinutes = 15;
         } else {
             limit = 30;
             windowMinutes = 15;

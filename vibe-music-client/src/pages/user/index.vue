@@ -4,7 +4,7 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { UserStore } from '@/stores/modules/user'
 import defaultAvatar from '@/assets/user.jpg'
-import { updateUserInfo, updateUserAvatar, deleteUser, getUserInfo } from '@/api/system'
+import { updateUserInfo, updateUserAvatar, deleteUser, getUserInfo, sendEmailCode } from '@/api/system'
 import 'vue-cropper/dist/index.css'
 import { VueCropper } from "vue-cropper";
 import { useRouter } from 'vue-router'
@@ -24,8 +24,28 @@ const userForm = reactive({
   username: userStore.userInfo.username || '',
   phone: userStore.userInfo.phone || '',
   email: userStore.userInfo.email || '',
-  introduction: userStore.userInfo.introduction || ''
+  introduction: userStore.userInfo.introduction || '',
+  verificationCode: '',
 })
+const emailChanged = computed(() => userForm.email.trim().toLowerCase() !== (userStore.userInfo.email || '').trim().toLowerCase())
+const sendingCode = ref(false)
+const codeDeadline = ref(0)
+const secondsLeft = ref(0)
+const codeTimer = setInterval(() => { secondsLeft.value = Math.max(0, Math.ceil((codeDeadline.value - Date.now()) / 1000)) }, 1000)
+onUnmounted(() => clearInterval(codeTimer))
+const sendNewEmailCode = async () => {
+  if (sendingCode.value || secondsLeft.value) return
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(userForm.email)) return ElMessage.warning('请先填写有效的新邮箱')
+  sendingCode.value = true
+  try {
+    const result = await sendEmailCode(userForm.email.trim())
+    if (result.code !== 0) throw new Error(result.message)
+    codeDeadline.value = Date.now() + 60000
+    secondsLeft.value = 60
+    ElMessage.success('验证码已发送至新邮箱')
+  } catch (error: any) { ElMessage.error(error.message || '发送失败') }
+  finally { sendingCode.value = false }
+}
 
 // 表单验证规则
 const userRules = reactive<FormRules>({
@@ -261,6 +281,10 @@ const handleDelete = async () => {
         <el-form-item prop="email">
           <el-input v-model="userForm.email" placeholder="邮箱" />
         </el-form-item>
+        <div v-if="emailChanged" class="flex items-center gap-3 mb-5">
+          <el-input v-model="userForm.verificationCode" placeholder="新邮箱验证码" maxlength="6" aria-label="新邮箱验证码" />
+          <el-button :loading="sendingCode" :disabled="secondsLeft > 0" @click="sendNewEmailCode">{{ secondsLeft ? `${secondsLeft}s 后重试` : '验证新邮箱' }}</el-button>
+        </div>
       </div>
 
       <div class="section">

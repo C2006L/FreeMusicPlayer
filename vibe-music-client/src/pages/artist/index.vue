@@ -1,220 +1,75 @@
 <script setup lang="ts">
-import { categories } from '@/utils/enum'
-import { getAllArtists } from '@/api/system'
-import { ElNotification } from 'element-plus'
-import defaultAvatar from '@/assets/user.jpg'
+import { searchOnlineSongs } from '@/api/system'
+import type { Song } from '@/api/interface'
+import { relatedArtists } from '@/utils/artists'
 
 const router = useRouter()
-const artistList = ref([])
-
-const selectedGender = ref('-1')
-const selectedArea = ref('-1')
-
-// 分页相关
+const route = useRoute()
+const searchKeyword = ref(String(route.query.query || ''))
+const allArtists = ref<ReturnType<typeof relatedArtists>>([])
 const currentPage = ref(1)
 const pageSize = ref(12)
-const total = ref(0)
-
-const state = reactive({
-  size: 'default',
-  disabled: false,
-  background: false,
-  layout: 'total, sizes, prev, pager, next, jumper',
-  total: 0,
-  pageSizes: [12, 24, 36, 48],
-})
-
-const searchKeyword = ref('')
-
-// 切换菜单显示
-const toggleMenu = (index: number) => {
-  categories.value[index].isOpen = !categories.value[index].isOpen
-}
-
-// 处理分页大小变化
-const handleSizeChange = () => {
+const searched = ref(false)
+const loading = ref(false)
+const error = ref('')
+const submitted = ref('')
+let requestId = 0
+let controller: AbortController | undefined
+const hotKeywords = ['周杰伦', '林俊杰', '陈奕迅', '邓紫棋', '五月天', 'Taylor Swift', 'Adele', 'Linkin Park']
+const artists = computed(() => allArtists.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value))
+const search = async (value = searchKeyword.value) => {
+  controller?.abort()
+  const id = ++requestId
+  searchKeyword.value = value
+  submitted.value = value.trim()
+  allArtists.value = []
   currentPage.value = 1
-  handleGetArtistList()
+  error.value = ''
+  searched.value = Boolean(submitted.value)
+  loading.value = searched.value
+  if (!searched.value) return
+  controller = new AbortController()
+  try {
+    const result = await searchOnlineSongs(submitted.value, undefined, 50, controller.signal)
+    if (id !== requestId) return
+    if (result.code !== 0 || !Array.isArray(result.data)) throw new Error(result.message || '歌手搜索失败')
+    allArtists.value = relatedArtists(result.data as Song[], submitted.value)
+  } catch (e: any) {
+    if (id === requestId && e?.code !== 'ERR_CANCELED') error.value = e?.message || '在线曲库无法连接'
+  } finally { if (id === requestId) loading.value = false }
 }
-
-// 处理页码变化
-const handleCurrentChange = () => {
-  handleGetArtistList()
-}
-
-const handleSubCategoryClick = (id: string, index: number) => {
-  if (index === 0) {
-    selectedGender.value = id
-  } else {
-    selectedArea.value = id
-  }
-  currentPage.value = 1
-  handleGetArtistList()
-}
-
-const handleGetArtistList = () => {
-  const params = {
-    pageNum: currentPage.value,
-    pageSize: pageSize.value,
-    name: null,
-    gender: selectedGender.value === '-1' ? null : categories.value[0].subCategories.find(item => item.id === selectedGender.value)?.value,
-    area: selectedArea.value === '-1' ? null : categories.value[1].subCategories.find(item => item.id === selectedArea.value)?.value
-  }
-
-  getAllArtists(params).then((res) => {
-    if (res.code === 0 && res.data) {
-      artistList.value = res.data.items.map(item => ({
-        artistId: item.artistId,
-        name: item.artistName,
-        picUrl: item.avatar || defaultAvatar,
-        alias: []
-      }))
-      total.value = res.data.total
-      state.total = res.data.total
-    } else {
-      ElNotification({
-        type: 'error',
-        message: '获取歌手列表失败',
-        duration: 2000,
-      })
-    }
-  })
-}
-
-const handleSearch = () => {
-  const params = {
-    pageNum: currentPage.value,
-    pageSize: pageSize.value,
-    artistName: searchKeyword.value || null,
-    gender: selectedGender.value === '-1' ? null : categories.value[0].subCategories.find(item => item.id === selectedGender.value)?.value,
-    area: selectedArea.value === '-1' ? null : categories.value[1].subCategories.find(item => item.id === selectedArea.value)?.value
-  }
-
-  getAllArtists(params).then((res) => {
-    if (res.code === 0 && res.data) {
-      artistList.value = res.data.items.map(item => ({
-        artistId: item.artistId,
-        name: item.artistName,
-        picUrl: item.avatar || defaultAvatar,
-        alias: []
-      }))
-      total.value = res.data.total
-      state.total = res.data.total
-    } else {
-      ElNotification({
-        type: 'error',
-        message: '获取歌手列表失败',
-        duration: 2000,
-      })
-    }
-  })
-}
-
-const handleReset = () => {
-  searchKeyword.value = ''
-  selectedGender.value = '-1'
-  selectedArea.value = '-1'
-  currentPage.value = 1
-  handleGetArtistList()
-}
-
-onMounted(() => {
-  handleGetArtistList()
-})
+const openArtist = (artist: typeof allArtists.value[number]) => router.push({ path: '/library', query: { query: artist.name, artist: artist.name, source: artist.source } })
+watch(pageSize, () => { currentPage.value = 1 })
+onMounted(() => { if (searchKeyword.value) void search() })
+onUnmounted(() => { requestId++; controller?.abort() })
 </script>
+
 <template>
-  <div class="flex h-full">
-    <div class="w-64 bg-background p-4">
-      <div class="flex items-center justify-between mb-4">
-        <h2 class="text-lg font-semibold">歌手分类</h2>
-        <button @click="handleReset"
-          class="inline-flex items-center text-sm text-muted-foreground hover:text-foreground">
-          <icon-bx:reset class="mr-1 h-4 w-4" />
-          重置
+  <section class="artist-page">
+    <header class="artist-header">
+      <div><p class="eyebrow">ARTISTS</p><h1>歌手发现</h1><p class="description">从在线歌曲发现相关歌手，按平台保留结果。同名结果可能属于不同歌手。</p></div>
+      <form class="artist-search" @submit.prevent="search()">
+        <label class="sr-only" for="artist-query">搜索歌手</label>
+        <input id="artist-query" v-model="searchKeyword" placeholder="输入歌手或乐队名称" maxlength="100" />
+        <button type="submit">搜索</button><button type="button" @click="search('')">重置</button>
+      </form>
+    </header>
+    <div class="artist-body">
+      <div v-if="loading" class="artist-state" role="status">正在搜索「{{ submitted }}」…</div>
+      <div v-else-if="error" class="artist-state" role="alert"><h2>暂时无法搜索</h2><p>{{ error }}</p><button @click="search(submitted)">重试</button></div>
+      <div v-else-if="!searched" class="artist-state"><h2>从一个熟悉的名字开始</h2><p>搜索歌手，查看各平台返回的相关歌曲。</p><div class="keyword-list"><button v-for="word in hotKeywords" :key="word" @click="search(word)">{{ word }}</button></div></div>
+      <div v-else-if="!allArtists.length" class="artist-state"><h2>未找到相关歌手</h2><p>「{{ submitted }}」没有匹配结果，可尝试完整名称、其他语言名称或别名。</p></div>
+      <div v-else class="artist-grid">
+        <button v-for="artist in artists" :key="artist.key" class="artist-item" @click="openArtist(artist)">
+          <span class="artist-monogram" aria-hidden="true">{{ artist.name.slice(0, 1).toUpperCase() }}</span>
+          <strong :title="artist.name">{{ artist.name }}</strong><span>{{ artist.sourceName }}</span><small>本次找到 {{ artist.count }} 首相关歌曲</small>
         </button>
       </div>
-
-      <nav>
-        <div class="relative">
-          <icon-akar-icons:search
-            class="lucide lucide-search absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" />
-          <input v-model="searchKeyword" @keyup.enter="handleSearch"
-            class="flex h-10 rounded-lg border border-input transform duration-300 bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-0 pl-10 w-56"
-            placeholder="搜索歌手" />
-        </div>
-
-        <div class="mb-2 mt-4">
-          <button
-            class="inline-flex items-center justify-between gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2 w-full"
-            @click="toggleMenu(0)">
-            {{ categories[0].name }}
-            <icon-tabler:chevron-right :style="{
-              transform: categories[0].isOpen ? 'rotate(90deg)' : 'rotate(0deg)',
-              transition: 'transform 0.3s ease',
-            }" />
-          </button>
-          <div v-show="categories[0].isOpen" class="ml-4 mt-1 space-y-1">
-            <button v-for="(subCategory, subIndex) in categories[0].subCategories" :key="subIndex"
-              @click="handleSubCategoryClick(subCategory.id, 0)"
-              class="inline-flex items-center gap-2 whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 hover:text-accent-foreground h-9 rounded-md px-3 w-48 justify-start"
-              :class="selectedGender === subCategory.id ? 'bg-activeMenuBg text-accent-foreground' : 'hover:bg-hoverMenuBg text-foreground'">
-              {{ subCategory.label }}
-            </button>
-          </div>
-        </div>
-        <div class="mb-2">
-          <button
-            class="inline-flex items-center justify-between gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2 w-full"
-            @click="toggleMenu(1)">
-            {{ categories[1].name }}
-            <icon-tabler:chevron-right :style="{
-              transform: categories[1].isOpen ? 'rotate(90deg)' : 'rotate(0deg)',
-              transition: 'transform 0.3s ease',
-            }" />
-          </button>
-          <div v-show="categories[1].isOpen" class="ml-4 mt-1 space-y-1">
-            <button v-for="(subCategory, subIndex) in categories[1].subCategories" :key="subIndex"
-              @click="handleSubCategoryClick(subCategory.id, 1)"
-              class="inline-flex items-center gap-2 whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 hover:text-accent-foreground h-9 rounded-md px-3 w-48 justify-start"
-              :class="selectedArea === subCategory.id ? 'bg-activeMenuBg text-accent-foreground' : 'hover:bg-hoverMenuBg text-foreground'">
-              {{ subCategory.label }}
-            </button>
-          </div>
-        </div>
-      </nav>
     </div>
-    <main class="flex-1">
-      <div class="p-2 md:p-4 lg:p-6">
-        <div class="w-[86%] mx-auto">
-          <div class="grid grid-cols-4 gap-x-16 gap-y-8">
-            <div v-for="(artist, index) in artistList" :key="index"
-              class="group relative rounded-full text-card-foreground shadow-md hover:shadow-xl">
-              <button @click="router.push(`/artist/${artist.artistId}`)" class="w-full h-full overflow-hidden rounded-full">
-                <div class="w-full h-full relative">
-                  <el-image lazy :alt="artist.name"
-                    class="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-110"
-                    :src="artist.picUrl + '?param=230y230'" />
-                  <div
-                    class="absolute inset-0 bg-black/40 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
-                  </div>
-                  <div
-                    class="absolute bottom-0 left-0 right-0 px-4 py-3 text-white opacity-0 transition-opacity duration-300 group-hover:opacity-100 z-10">
-                    <h2 class="mb-1 text-xl font-semibold">{{ artist.name }}</h2>
-                    <p class="mb-2 text-sm" v-if="artist.alias && artist.alias.length > 0">
-                      {{ artist.alias.join() }}
-                    </p>
-                  </div>
-                </div>
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-      <!-- 分页 -->
-      <nav class="mx-auto flex w-full justify-center mt-6">
-        <el-pagination v-model:page-size="pageSize" v-model:currentPage="currentPage" v-bind="state"
-          @size-change="handleSizeChange" @current-change="handleCurrentChange" />
-      </nav>
-    </main>
-  </div>
+    <el-pagination v-if="allArtists.length" v-model:current-page="currentPage" v-model:page-size="pageSize" :total="allArtists.length" :page-sizes="[12,24,48]" layout="total, sizes, prev, pager, next" />
+  </section>
 </template>
+
+<style scoped>
+.artist-page{display:flex;flex-direction:column;height:100%;min-height:0;padding:24px 32px;gap:20px}.artist-header{border-bottom:1px solid hsl(var(--border));padding-bottom:20px;display:flex;gap:24px;justify-content:space-between;flex-wrap:wrap}.eyebrow{font-size:10px;letter-spacing:.2em;color:var(--primary)}h1{font-size:26px;font-weight:650;margin:4px 0 8px}.description,.artist-state p{font-size:12px;color:hsl(var(--muted-foreground));max-width:540px;line-height:1.8}.artist-search{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.artist-search input{min-width:160px;width:240px;background:hsl(var(--muted));border:1px solid hsl(var(--border));border-radius:6px;padding:9px 12px;font-size:13px}.artist-search button,.artist-state button{padding:8px 12px;border:1px solid hsl(var(--border));border-radius:6px;font-size:12px}.artist-search button[type=submit]{color:var(--primary)}.artist-body{min-height:0;flex:1;overflow-y:auto}.artist-state{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:300px;gap:14px;text-align:center}.artist-state h2{font-size:20px}.keyword-list{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;max-width:540px}.artist-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:24px 20px}.artist-item{display:flex;flex-direction:column;align-items:center;gap:7px;padding:16px 8px;min-width:0;border-radius:8px}.artist-item:hover{background:hsl(var(--muted)/.5)}.artist-monogram{width:104px;height:104px;border-radius:50%;display:grid;place-items:center;background:hsl(var(--muted));color:var(--primary);font-size:36px;margin-bottom:8px}.artist-item strong{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px}.artist-item span:not(.artist-monogram),small{font-size:11px;color:hsl(var(--muted-foreground))}@media(max-width:640px){.artist-page{padding:18px 14px}.artist-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style>

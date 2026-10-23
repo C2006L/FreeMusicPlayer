@@ -1,3 +1,5 @@
+server:
+  port: ${FMP_BACKEND_PORT:18080}
 vibe-music:
   datasource:
     url: jdbc:mysql://127.0.0.1:13306/vibe_music?useUnicode=true&characterEncoding=utf-8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
@@ -21,4 +23,4 @@ vibe-music:
       api-key: ${DASHSCOPE_API_KEY:not-configured}
   online:
     provider-url: http://127.0.0.1:3001
-    provider-public-url: http://127.0.0.1:8080/song
+    provider-public-url: http://localhost:${FMP_BACKEND_PORT:18080}/song

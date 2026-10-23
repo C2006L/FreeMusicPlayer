@@ -1,159 +1,141 @@
 package com.vibemusic.controller.agent;
 
-import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
+import com.vibemusic.agent.OnlineAgentTools;
 import com.vibemusic.agent.MusicAgentTools;
 import com.vibemusic.model.dto.AgentChatDTO;
-import jakarta.servlet.http.HttpServletResponse;
-import lombok.extern.slf4j.Slf4j;
+import com.vibemusic.service.OnlineMusicService;
+import com.vibemusic.service.AiStatusService;
+import com.vibemusic.util.ThreadLocalUtil;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
-import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
-import reactor.core.publisher.Flux;
+import reactor.core.Disposable;
 
 import java.io.IOException;
+import java.time.Duration;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static com.vibemusic.agent.AgentPrompt.DEFAULT_PROMPT;
+import static org.springframework.http.HttpStatus.TOO_MANY_REQUESTS;
 
-@Slf4j
 @RestController
 @RequestMapping("/agent")
 public class AgentController {
+    private final ChatClient client;
+    private final OnlineMusicService music;
+    private final ChatMemory memory = MessageWindowChatMemory.builder().maxMessages(12).build();
+    private final Map<String, Long> conversations = new ConcurrentHashMap<>();
+    private final Map<String, String> activeOwners = new ConcurrentHashMap<>();
+    private final Map<String, Runnable> cancellations = new ConcurrentHashMap<>();
+    private final String provider;
+    private final String model;
+    private final AiStatusService aiStatus;
+    private final MusicAgentTools localMusic;
 
-
-    private final ChatClient chatClient;
-    private final boolean aiConfigured;
-
-    public AgentController(ChatClient.Builder chatClientBuilder,
-                           MusicAgentTools musicAgentTools,
-                           @Value("${vibe-music.ai.dashscope.api-key:not-configured}") String apiKey) {
-        log.info("AgentController constructor");
-        this.aiConfigured = apiKey != null && !apiKey.isBlank() && !"not-configured".equals(apiKey);
-        this.chatClient = chatClientBuilder
-                .defaultSystem(DEFAULT_PROMPT)
-                .defaultAdvisors(
-                        MessageChatMemoryAdvisor.builder(MessageWindowChatMemory.builder().build()).build(),
-                        new SimpleLoggerAdvisor())
-                // 设置 ChatClient 中 ChatModel 的 Options 参数
-                .defaultOptions(
-                        DashScopeChatOptions.builder()
-                                .topP(0.7)
-                                // 必须开启增量输出，否则 DashScope 会把整段回复一次性返回，前端无法流式展示
-                                .incrementalOutput(true)
-                                .build()
-                )
-                // 注册 VibeAgent 可调用的音乐数据工具
-                .defaultTools(musicAgentTools)
-                .build();
+    public AgentController(ObjectProvider<ChatModel> models, OnlineMusicService music, AiStatusService aiStatus, MusicAgentTools localMusic,
+                           @Value("${spring.ai.model.chat:ollama}") String provider,
+                           @Value("${spring.ai.ollama.chat.options.model:qwen2.5:3b}") String model) {
+        this.music = music;
+        this.aiStatus = aiStatus;
+        this.localMusic = localMusic;
+        this.provider = provider;
+        this.model = model;
+        var chatModel = models.getIfAvailable();
+        this.client = chatModel == null ? null : ChatClient.builder(chatModel).defaultSystem(DEFAULT_PROMPT)
+                .defaultAdvisors(MessageChatMemoryAdvisor.builder(memory).build()).build();
     }
 
-    /**
-     * VibeAgent 聊天接口，供前端聊天窗使用（SSE 流式输出）
-     */
     @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter chat(@RequestBody AgentChatDTO dto, HttpServletResponse response) {
-        log.info("chatController chat");
-        response.setCharacterEncoding("UTF-8");
-        // 禁止代理/容器缓冲，保证流式逐段到达
-        response.setHeader("Cache-Control", "no-cache, no-transform");
-        response.setHeader("X-Accel-Buffering", "no");
-
-        SseEmitter emitter = new SseEmitter(0L);
-        if (!aiConfigured) {
-            sendTextAndComplete(emitter, "AI 音乐助手尚未配置。请先设置 DASHSCOPE_API_KEY，再重新启动后端。");
+    public SseEmitter chat(@Valid @RequestBody AgentChatDTO dto, HttpServletRequest request) {
+        String owner = owner(request);
+        String lease = java.util.UUID.randomUUID().toString();
+        if (activeOwners.putIfAbsent(owner, lease) != null) throw new ResponseStatusException(TOO_MANY_REQUESTS, "请先结束当前回复");
+        cleanup();
+        String conversation = owner + ":" + dto.getConversationId();
+        conversations.put(conversation, System.currentTimeMillis());
+        SseEmitter emitter = new SseEmitter(120_000L);
+        AtomicReference<Disposable> subscription = new AtomicReference<>();
+        Runnable release = () -> {
+            Disposable pending = subscription.getAndSet(null);
+            if (pending != null) pending.dispose();
+            if (activeOwners.remove(owner, lease)) cancellations.remove(owner);
+        };
+        emitter.onCompletion(release);
+        emitter.onTimeout(() -> { release.run(); emitter.complete(); });
+        emitter.onError(error -> release.run());
+        cancellations.put(owner, () -> { release.run(); emitter.complete(); });
+        if (client == null) {
+            send(emitter, "error", "AI 未启用，请检查模型配置");
+            release.run();
+            emitter.complete();
             return emitter;
         }
-        Flux<String> content = this.chatClient.prompt(dto.getQuery())
-                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, dto.getConversationId())
-                ).stream().content();
-        streamToEmitter(content, emitter);
-        return emitter;
-    }
-
-    /**
-     * 把流式内容逐段推送到 SseEmitter（每次 send 都会立即 flush 到客户端）
-     */
-    private void streamToEmitter(Flux<String> content, SseEmitter emitter) {
-        content.subscribe(
-                delta -> {
-                    try {
-                        emitter.send(SseEmitter.event().name("text").data(delta));
-                    } catch (IOException e) {
-                        log.warn("SSE 客户端已断开: {}", e.getMessage());
-                        emitter.complete();
-                    }
-                },
-                error -> {
-                    log.error("agent 对话流式输出失败", error);
-                    sendTextAndComplete(emitter, friendlyAiError(error));
-                },
-                emitter::complete
-        );
-    }
-
-    /**
-     * ChatClient 简单调用（GET，便于手动测试）
-     */
-    @GetMapping("/simple/chat")
-    public String simpleChat(@RequestParam(value = "query", defaultValue = "你好，很高兴认识你，能简单介绍一下自己吗？") String query) {
-        if (!aiConfigured) {
-            return "AI 音乐助手尚未配置。请先设置 DASHSCOPE_API_KEY，再重新启动后端。";
-        }
-        try {
-            return chatClient.prompt(query).call().content();
-        } catch (Exception exception) {
-            log.error("agent 简单对话失败", exception);
-            return friendlyAiError(exception);
-        }
-    }
-
-    /**
-     * ChatClient 流式调用（GET，便于手动测试，curl -N 观察逐段输出）
-     */
-    @GetMapping("/stream/chat")
-    public SseEmitter streamChat(@RequestParam(value = "query", defaultValue = "你好，很高兴认识你，能简单介绍一下自己吗？") String query,
-                                 HttpServletResponse response) {
-
-        response.setCharacterEncoding("UTF-8");
-        response.setHeader("Cache-Control", "no-cache, no-transform");
-        response.setHeader("X-Accel-Buffering", "no");
-
-        SseEmitter emitter = new SseEmitter(0L);
-        if (!aiConfigured) {
-            sendTextAndComplete(emitter, "AI 音乐助手尚未配置。请先设置 DASHSCOPE_API_KEY，再重新启动后端。");
-            return emitter;
-        }
-        streamToEmitter(chatClient.prompt(query).stream().content(), emitter);
+        OnlineAgentTools tools = new OnlineAgentTools(music, localMusic);
+        Disposable running = client.prompt().user(dto.getQuery()).tools(tools)
+                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversation))
+                .stream().content().timeout(Duration.ofSeconds(90))
+                .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic())
+                .subscribe(delta -> {
+                    if (!send(emitter, "text", delta)) { release.run(); emitter.complete(); }
+                }, error -> {
+                    send(emitter, "error", "AI 暂时无法回复：请检查 " + provider + " 服务、模型或密钥，或稍后重试。");
+                    release.run();
+                    emitter.complete();
+                }, () -> {
+                    send(emitter, "songs", tools.songs());
+                    send(emitter, "done", "");
+                    release.run();
+                    emitter.complete();
+                });
+        subscription.set(running);
+        if (!lease.equals(activeOwners.get(owner))) running.dispose();
         return emitter;
     }
 
     @GetMapping("/status")
-    public java.util.Map<String, Object> status() {
-        return java.util.Map.of(
-                "configured", aiConfigured,
-                "message", aiConfigured ? "AI 音乐助手已配置" : "缺少 DASHSCOPE_API_KEY"
-        );
+    public Map<String, Object> status() {
+        return aiStatus.status();
     }
 
-    private void sendTextAndComplete(SseEmitter emitter, String message) {
-        try {
-            emitter.send(SseEmitter.event().name("text").data(message));
-            emitter.complete();
-        } catch (IOException exception) {
-            emitter.completeWithError(exception);
+    @PostMapping("/cancel")
+    public Map<String, Boolean> cancel(HttpServletRequest request) {
+        Runnable cancel = cancellations.remove(owner(request));
+        if (cancel != null) cancel.run();
+        return Map.of("cancelled", cancel != null);
+    }
+
+    private String owner(HttpServletRequest request) {
+        Map<String, Object> claims = ThreadLocalUtil.get();
+        Object userId = claims == null ? null : claims.get("userId");
+        return userId == null ? "session:" + request.getSession(true).getId() : "user:" + userId;
+    }
+
+    private void cleanup() {
+        long cutoff = System.currentTimeMillis() - 30 * 60_000L;
+        conversations.forEach((key, lastSeen) -> {
+            if (lastSeen < cutoff) { memory.clear(key); conversations.remove(key, lastSeen); }
+        });
+        if (conversations.size() >= 500) {
+            conversations.entrySet().stream().min(Map.Entry.comparingByValue()).ifPresent(entry -> {
+                memory.clear(entry.getKey()); conversations.remove(entry.getKey());
+            });
         }
     }
 
-    private String friendlyAiError(Throwable error) {
-        String message = error == null ? "" : String.valueOf(error.getMessage());
-        if (message.contains("InvalidApiKey") || message.contains("401")) {
-            return "AI 服务密钥无效，请检查 DASHSCOPE_API_KEY 并重新启动后端。";
-        }
-        return "AI 服务暂时不可用，请稍后重试。在线搜索和歌曲播放不受影响。";
+    private boolean send(SseEmitter emitter, String name, Object data) {
+        try { emitter.send(SseEmitter.event().name(name).data(data)); return true; }
+        catch (IOException | IllegalStateException exception) { return false; }
     }
 }

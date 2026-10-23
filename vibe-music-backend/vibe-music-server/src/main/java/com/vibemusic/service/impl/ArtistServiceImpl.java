@@ -23,6 +23,7 @@ import com.vibemusic.service.IArtistService;
 import com.vibemusic.service.ISongService;
 import com.vibemusic.service.MinioService;
 import com.vibemusic.util.JwtUtil;
+import com.vibemusic.service.SessionService;
 import com.vibemusic.util.TypeConversionUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
@@ -54,6 +55,8 @@ import java.util.stream.Collectors;
 @Service
 @CacheConfig(cacheNames = "artistCache")
 public class ArtistServiceImpl extends ServiceImpl<ArtistMapper, Artist> implements IArtistService {
+    @Autowired
+    private SessionService sessions;
 
     @Autowired
     private ArtistMapper artistMapper;
@@ -198,7 +201,6 @@ public class ArtistServiceImpl extends ServiceImpl<ArtistMapper, Artist> impleme
      * @return 歌手详情
      */
     @Override
-    @Cacheable(key = "#artistId")
     public Result<ArtistDetailVO> getArtistDetail(Long artistId, HttpServletRequest request) {
         ArtistDetailVO artistDetailVO = artistMapper.getArtistDetailById(artistId);
 
@@ -214,7 +216,7 @@ public class ArtistServiceImpl extends ServiceImpl<ArtistMapper, Artist> impleme
 
         Map<String, Object> map = null;
         if (token != null && !token.isEmpty()) {
-            map = JwtUtil.parseToken(token);
+            map = sessions.optional(token);
         }
 
         // 如果 token 解析成功且用户为登录状态，进一步操作

@@ -19,6 +19,8 @@ import com.vibemusic.result.Result;
 import com.vibemusic.service.EmailService;
 import com.vibemusic.service.IUserService;
 import com.vibemusic.service.MinioService;
+import com.vibemusic.service.SessionService;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import com.vibemusic.util.JwtUtil;
 import com.vibemusic.util.PasswordUtil;
 import com.vibemusic.util.ThreadLocalUtil;
@@ -67,6 +69,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     @Autowired
     private EmailService emailService;
     @Autowired
+    private SessionService sessions;
+    @Autowired
     private MinioService minioService;
     @Resource
     private UserFavoriteMapper userFavoriteMapper;
@@ -109,8 +113,16 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
      */
     @Override
     public boolean verifyVerificationCode(String email, String verificationCode) {
-        String storedCode = stringRedisTemplate.opsForValue().get("verificationCode:" + email.trim().toLowerCase(Locale.ROOT));
-        return storedCode != null && storedCode.equals(verificationCode);
+        if (email == null || verificationCode == null) return false;
+        String normalized = email.trim().toLowerCase(Locale.ROOT);
+        // Consume exactly once. Attempts and TTL are updated atomically too.
+        String lua = "local code=redis.call('GET',KEYS[1]); if not code then return 0 end; "
+                + "local n=redis.call('INCR',KEYS[2]); if n==1 then redis.call('EXPIRE',KEYS[2],300) end; "
+                + "if n>5 then redis.call('DEL',KEYS[1]); return 0 end; "
+                + "if code~=ARGV[1] then return 0 end; redis.call('DEL',KEYS[1],KEYS[2]); return 1";
+        Long valid = stringRedisTemplate.execute(new DefaultRedisScript<>(lua, Long.class),
+                List.of("verificationCode:" + normalized, "verificationAttempts:" + normalized), verificationCode);
+        return Long.valueOf(1).equals(valid);
     }
 
     /**
@@ -123,8 +135,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     @CacheEvict(cacheNames = "userCache", allEntries = true)
     public Result register(UserRegisterDTO userRegisterDTO) {
         String normalizedEmail = userRegisterDTO.getEmail().trim().toLowerCase(Locale.ROOT);
-        // 删除Redis中的验证码
-        stringRedisTemplate.delete("verificationCode:" + normalizedEmail);
 
         User userByUsername = userMapper.selectOne(new QueryWrapper<User>().eq("username", userRegisterDTO.getUsername()));
         if (userByUsername != null) {
@@ -134,6 +144,10 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         User userByEmail = userMapper.selectOne(new QueryWrapper<User>().eq("email", normalizedEmail));
         if (userByEmail != null) {
             return Result.error(MessageConstant.EMAIL + MessageConstant.ALREADY_EXISTS);
+        }
+
+        if (!verifyVerificationCode(normalizedEmail, userRegisterDTO.getVerificationCode())) {
+            return Result.error("验证码无效、已使用或尝试次数过多，请重新获取");
         }
 
         User user = new User();
@@ -188,6 +202,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             claims.put(JwtClaimsConstant.USER_ID, user.getUserId());
             claims.put(JwtClaimsConstant.USERNAME, user.getUsername());
             claims.put(JwtClaimsConstant.EMAIL, user.getEmail());
+            claims.put("sessionVersion", sessions.version(user.getUserId()));
             String token = JwtUtil.generateToken(claims);
 
             // 将token存入redis
@@ -236,6 +251,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         Map<String, Object> map = ThreadLocalUtil.get();
         Object userIdObj = map.get(JwtClaimsConstant.USER_ID);
         Long userId = TypeConversionUtil.toLong(userIdObj);
+        User currentUser = userMapper.selectById(userId);
+        if (currentUser == null) return Result.error("用户不存在");
+        userDTO.setEmail(userDTO.getEmail().trim().toLowerCase(Locale.ROOT));
 
         User userByUsername = userMapper.selectOne(new QueryWrapper<User>().eq("username", userDTO.getUsername()));
         if (userByUsername != null && !userByUsername.getUserId().equals(userId)) {
@@ -254,6 +272,11 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 
         User user = new User();
         BeanUtils.copyProperties(userDTO, user);
+        user.setUserId(userId);
+        if (!currentUser.getEmail().equalsIgnoreCase(userDTO.getEmail())
+                && !verifyVerificationCode(userDTO.getEmail(), userDTO.getVerificationCode())) {
+            return Result.error("更换邮箱需要验证新邮箱，请填写有效验证码");
+        }
         user.setUpdateTime(LocalDateTime.now());
 
         if (userMapper.updateById(user) == 0) {
@@ -319,7 +342,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         }
 
         // 注销token
-        stringRedisTemplate.delete(token);
+        stringRedisTemplate.delete(SessionService.stripBearer(token));
+        sessions.revokeUser(userId);
 
         return Result.success(MessageConstant.UPDATE + MessageConstant.SUCCESS);
     }
@@ -332,8 +356,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
      */
     @Override
     public Result resetUserPassword(UserResetPasswordDTO userResetPasswordDTO) {
-        // 删除Redis中的验证码
-        stringRedisTemplate.delete("verificationCode:" + userResetPasswordDTO.getEmail());
+        userResetPasswordDTO.setEmail(userResetPasswordDTO.getEmail().trim().toLowerCase(Locale.ROOT));
 
         User user = userMapper.selectOne(new QueryWrapper<User>().eq("email", userResetPasswordDTO.getEmail()));
         if (user == null) {
@@ -344,11 +367,16 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             return Result.error(MessageConstant.PASSWORD_NOT_MATCH);
         }
 
+        if (!verifyVerificationCode(userResetPasswordDTO.getEmail(), userResetPasswordDTO.getVerificationCode())) {
+            return Result.error("验证码无效、已使用或尝试次数过多，请重新获取");
+        }
+
         if (userMapper.update(new User().setPassword(PasswordUtil.encode(userResetPasswordDTO.getNewPassword())).setUpdateTime(LocalDateTime.now()),
                 new QueryWrapper<User>().eq("id", user.getUserId())) == 0) {
             return Result.error(MessageConstant.PASSWORD + MessageConstant.RESET + MessageConstant.FAILED);
         }
 
+        sessions.revokeUser(user.getUserId());
         return Result.success(MessageConstant.PASSWORD + MessageConstant.RESET + MessageConstant.SUCCESS);
     }
 
@@ -403,6 +431,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         if (userMapper.deleteById(userId) == 0) {
             return Result.error(MessageConstant.DELETE + MessageConstant.FAILED);
         }
+        sessions.revokeUser(userId);
 
         // 删除头像
         String userAvatar = user.getUserAvatar();
@@ -578,6 +607,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         if (rows == 0) {
             return Result.error(MessageConstant.UPDATE + MessageConstant.FAILED);
         }
+        sessions.revokeUser(userId);
         return Result.success(MessageConstant.UPDATE + MessageConstant.SUCCESS);
     }
 

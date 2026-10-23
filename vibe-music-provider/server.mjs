@@ -1,5 +1,6 @@
 import http from 'node:http'
 import Meting from '@meting/core'
+import { relevanceScore, matchesSearch } from './search-utils.mjs'
 
 const port = Number(process.env.PORT || 3001)
 const host = process.env.HOST || '127.0.0.1'
@@ -26,6 +27,13 @@ const sourceNames = {
 const discoveryCache = { expiresAt: 0, songs: [], failedSources: [] }
 const resourceCache = new Map()
 const availabilityCache = new Map()
+const sourceHealth = new Map()
+setInterval(() => {
+  for (const cache of [resourceCache, availabilityCache]) {
+    for (const [key, item] of cache) if (item.expiresAt <= Date.now()) cache.delete(key)
+    while (cache.size > 1000) cache.delete(cache.keys().next().value)
+  }
+}, 60000).unref()
 const sourceCookies = {
   netease: process.env.MUSIC_COOKIE_NETEASE || '',
   tencent: process.env.MUSIC_COOKIE_TENCENT || '',
@@ -133,6 +141,7 @@ const searchGoMusicApi = async (keyword, sources, limit) => {
     .forEach((source) => query.append('sources', source))
   const response = await withTimeout(fetch(`${goMusicApiUrl}/api/v1/music/search?${query}`, {
     headers: { Accept: 'application/json', 'User-Agent': 'FreeMusicPlayer/2.0' },
+    signal: AbortSignal.timeout(14000),
   }), 20000)
   if (!response.ok) throw new Error(`go-music-api search failed (${response.status})`)
   const payload = await response.json()
@@ -169,22 +178,7 @@ const searchGoMusicApi = async (keyword, sources, limit) => {
   }).filter((song) => song?.id && song.name)
 }
 
-const normalizeForRank = (value) => String(value || '').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '')
-
-const relevanceScore = (song, keyword) => {
-  const query = normalizeForRank(keyword)
-  const name = normalizeForRank(song.name)
-  const artist = normalizeForRank(song.artist)
-  if (!query) return 0
-  let score = name === query ? 100 : name.startsWith(query) ? 80 : name.includes(query) ? 60 : 0
-  if (artist === query) score += 50
-  else if (artist.includes(query)) score += 25
-  if (song.availability === 'unavailable') score -= 30
-  if (song.availability === 'restricted') score -= 8
-  return score
-}
-
-const aggregateSearch = async (keyword, sources, limit) => {
+const aggregateSearch = async (keyword, sources, limit, strict = true) => {
   const goRequested = sources.map(normalizeSourceForGo).filter((source) => goSources.has(source))
   const metingRequested = sources.filter((source) => metingSources.has(source))
   const tasks = []
@@ -211,6 +205,7 @@ const aggregateSearch = async (keyword, sources, limit) => {
   const failedSources = []
   const songs = []
   settled.forEach((result, index) => {
+    sourceHealth.set(taskNames[index], { status: result.status === 'fulfilled' ? result.value.length ? 'UP' : 'EMPTY' : 'FAILED', checkedAt: new Date().toISOString() })
     if (result.status === 'fulfilled') songs.push(...result.value)
     else failedSources.push(taskNames[index])
   })
@@ -229,6 +224,7 @@ const aggregateSearch = async (keyword, sources, limit) => {
 
   const seen = new Set()
   const deduplicated = songs.filter((song) => {
+    if (strict && !matchesSearch(song, keyword)) return false
     // Keep the same recording from different providers. The UI can expose
     // these alternatives and the player can switch source when one is a trial.
     const key = `${song.source}::${song.id}`
@@ -297,6 +293,7 @@ const server = http.createServer(async (request, response) => {
   if (request.method === 'GET' && url.pathname === '/health') {
     return sendJson(response, 200, {
       status: 'ok',
+      recentSourceStatus: Object.fromEntries(sourceHealth),
       sources: [...supportedSources],
       engines: {
         meting: 'up',
@@ -316,7 +313,7 @@ const server = http.createServer(async (request, response) => {
       })
     }
 
-    const result = await aggregateSearch('热门歌曲', defaultSources, Math.ceil(limit / defaultSources.length) + 3)
+    const result = await aggregateSearch('热门歌曲', defaultSources, Math.ceil(limit / defaultSources.length) + 3, false)
     const candidates = result.songs.filter((song) => song.availability !== 'unavailable')
     const metingCandidates = candidates.filter((song) => song.providerEngine === 'meting')
     const playableMeting = await keepPlayableSongs(metingCandidates)

@@ -114,6 +114,7 @@ public interface SongMapper extends BaseMapper<Song> {
                 FROM tb_song s
                 LEFT JOIN tb_artist a ON s.artist_id = a.id
                 WHERE s.media_status = 'active'
+                  AND s.source = 'local'
                   AND #{keyword} IS NOT NULL AND #{keyword} <> ''
                   AND (s.name LIKE CONCAT('%', #{keyword}, '%')
                        OR a.name LIKE CONCAT('%', #{keyword}, '%')

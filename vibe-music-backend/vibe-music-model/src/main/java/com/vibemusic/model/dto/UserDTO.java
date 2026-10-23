@@ -19,6 +19,8 @@ public class UserDTO implements Serializable {
      * 用户 id
      */
     private Long userId;
+    /** Required only when changing the user's login email. */
+    private String verificationCode;
 
     /**
      * 用户名

@@ -22,6 +22,7 @@ export const MenuData = [
   {
     title: '我的',
     children: [
+      { title: '服务状态', icon: 'ri:heart-pulse-line', router: '/status' },
       { title: '喜欢', icon: 'ri:heart-line', router: '/like' },
       {
         title: '个人中心',

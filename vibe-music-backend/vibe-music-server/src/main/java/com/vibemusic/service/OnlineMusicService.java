@@ -6,6 +6,7 @@ import com.vibemusic.model.vo.OnlineSongVO;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.util.UriComponentsBuilder;
 import jakarta.servlet.http.HttpServletResponse;
 
@@ -13,6 +14,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
+import java.net.http.HttpClient;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -34,7 +37,9 @@ public class OnlineMusicService {
             ObjectMapper objectMapper,
             @Value("${vibe-music.online.provider-url:http://127.0.0.1:3001}") String providerUrl,
             @Value("${vibe-music.online.provider-public-url:http://127.0.0.1:8080/song}") String providerPublicUrl) {
-        this.restClient = restClientBuilder.build();
+        var factory = new JdkClientHttpRequestFactory(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build());
+        factory.setReadTimeout(Duration.ofSeconds(18));
+        this.restClient = restClientBuilder.requestFactory(factory).build();
         this.objectMapper = objectMapper;
         this.providerUrl = trimTrailingSlash(providerUrl);
         this.providerPublicUrl = trimTrailingSlash(providerPublicUrl);

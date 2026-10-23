@@ -1,4 +1,12 @@
 services:
+  mailpit:
+    profiles: ["mail"]
+    image: axllent/mailpit:v1.27.8
+    container_name: freemusicplayer-mailpit
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
   mysql:
     image: mysql:8.0
     container_name: vibe-music-mysql
@@ -10,7 +18,7 @@ services:
       MYSQL_PASSWORD: vibe_music_dev
       TZ: Asia/Shanghai
     ports:
-      - "13306:3306"
+      - "127.0.0.1:13306:3306"
     volumes:
       - ./.runtime/mysql:/var/lib/mysql
       - ./sql/vibe_music.sql:/docker-entrypoint-initdb.d/01-vibe-music.sql:ro
@@ -28,7 +36,7 @@ services:
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes", "--requirepass", "vibe_music_redis_dev"]
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - ./.runtime/redis:/data
     healthcheck:
@@ -63,8 +71,8 @@ services:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     volumes:
       - ./.runtime/minio:/data
     healthcheck:

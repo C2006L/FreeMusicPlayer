@@ -194,12 +194,13 @@ const handleLike = async () => {
     <div class="progress-row">
       <span class="time-label">{{ formatTime(isSeeking ? seekingTime : currentTime) }}</span>
       <el-slider
+        aria-label="播放进度"
         v-model="seekingTime"
         :step="1"
         :show-tooltip="false"
         :disabled="duration <= 0"
-        @mousedown="startSeeking"
-        @touchstart="startSeeking"
+        @mousedown.capture="startSeeking"
+        @touchstart.capture="startSeeking"
         @input="previewSeek"
         @change="seek"
         :max="Math.max(duration, 1)"
@@ -215,6 +216,7 @@ const handleLike = async () => {
         v-else-if="currentTrack.playbackStatus === 'preview'"
         class="whitespace-nowrap rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-500"
       >仅试听</span>
+      <span v-else-if="currentTrack.playbackStatus === 'error'" class="text-[10px] text-primary whitespace-nowrap">无法播放</span>
     </div>
   </div>
 </template>

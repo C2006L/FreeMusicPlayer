@@ -44,7 +44,7 @@ FreeMusicPlayer 是一个前后端分离的桌面风格音乐平台，包含用�
 - MyBatis-Plus + MySQL 数据访问
 - Redis 登录会话与业务缓存
 - MinIO 音频和图片对象存储
-- Spring AI + DashScope（通义千问）工具调用
+- Spring AI + Ollama / DashScope 工具调用
 - SSE 流式对话输出
 
 ## 系统结构
@@ -53,13 +53,13 @@ FreeMusicPlayer 是一个前后端分离的桌面风格音乐平台，包含用�
 浏览器（Vue 用户端 / 管理端）
         │ HTTP / SSE
         ▼
-Spring Boot API :8080
+Spring Boot API :18080
   ├─ MySQL :13306      业务数据
   ├─ Redis :6379       会话与缓存
   ├─ Provider :3001    统一音源适配、排序与兼容回退
   ├─ go-music-api :3002 多平台搜索、探测与流代理
   ├─ MinIO :9000       可选的用户附件存储
-  └─ DashScope         AI 对话与工具调用
+  └─ Ollama / DashScope  本地或云端 AI 对话与工具调用
 ```
 
 ```text
@@ -122,7 +122,7 @@ Maven Wrapper 和固定版本的 pnpm 会由脚本调用，无需全局单独安
 | --- | --- |
 | 用户端 | http://localhost:8090 |
 | 管理端 | http://localhost:8089 |
-| 后端 API | http://localhost:8080 |
+| 后端 API | http://localhost:18080 |
 | MinIO 控制台（仅 `-WithMinio`） | http://localhost:9001 |
 | 在线音乐 Provider | http://localhost:3001 |
 | 增强音源 API / Swagger | http://localhost:3002/swagger/index.html |
@@ -140,28 +140,63 @@ MinIO 本地开发账号为 `minioadmin / minioadmin`。MinIO 现在是可选的
 ### 修改后端代码后重新构建
 
 ```powershell
-.\scripts\stop-dev.ps1
-.\scripts\setup-dev.ps1 -SkipDockerPull
-.\scripts\start-dev.ps1
+.\scripts\restart-backend.ps1
 ```
 
 ## 启用 AI 音乐助手
 
-AI 助手需要有效的阿里云百炼 DashScope API Key。启动前在同一个 PowerShell 窗口设置：
+默认使用本机 Ollama 的 `qwen2.5:3b`，不会自动下载模型。先启动 Ollama，并确保模型已安装：
 
 ```powershell
+ollama list
+$env:OLLAMA_MODEL = "qwen2.5:3b"
+.\scripts\start-dev.ps1
+```
+
+可设置 `OLLAMA_BASE_URL`（默认 `http://127.0.0.1:11434`）或改用支持工具调用的其他模型。使用云端通义千问时：
+
+```powershell
+$env:FMP_AI_PROVIDER = "dashscope"
 $env:DASHSCOPE_API_KEY = "你的 API Key"
 .\scripts\start-dev.ps1
 ```
 
-API Key 不会写入仓库。未配置时，播放器的普通功能仍可使用，但机器人请求会失败。
+API Key 不会写入仓库。设置 `FMP_AI_PROVIDER=none` 可关闭 AI。修改配置后重启后端。用户端“服务状态”可查看模型是否存在、Ollama 是否在线或云端密钥是否配置。
 
 AI 请求链路：
 
 1. 用户端向 `POST /agent/chat` 提交会话 ID 和问题。
-2. Spring AI 把系统提示词、会话记忆和问题发送给通义千问。
-3. 模型需要真实曲库信息时，会调用 `MusicAgentTools` 查询 MySQL。
-4. 后端把模型增量内容封装成 SSE 事件推送给浏览器。
+2. Spring AI 把系统提示词、隔离的会话记忆和问题发送给选定模型。
+3. 模型通过 `OnlineAgentTools` 调用在线曲库，用户要求本地音乐时查询有效的本地曲库；推荐卡片直接来自查询结果，不由模型编造播放地址。
+4. 后端通过 SSE 的 text、songs、error、done 事件推送结果，支持超时、停止生成和断线取消。
+
+## 邮箱与账号
+
+登录使用邮箱和密码；注册、找回密码及变更邮箱需要一次性验证码。新密码使用 BCrypt，旧 MD5 账号成功登录后自动迁移。改密或找回密码会撤销旧会话。
+
+本地测试邮件使用 Mailpit，不会发往外部邮箱：
+
+```powershell
+.\scripts\start-dev.ps1 -WithMail
+```
+
+打开 `http://localhost:8025` 查看验证码。真实邮件服务使用 `SMTP_HOST`、`SMTP_PORT`、`SMTP_USERNAME`、`SMTP_PASSWORD`，并按供应商要求设置 `SMTP_AUTH`、`SMTP_SSL` 或 `SMTP_STARTTLS`。
+
+JWT 密钥由脚本生成到 `.runtime/jwt-secret.txt`。IDE 启动时需自行设置 `VIBE_MUSIC_JWT_SECRET`。登录凭据保存在当前浏览器会话中。
+
+## 歌手发现与服务诊断
+
+当前上游没有独立歌手搜索接口。歌手页从真实歌曲结果提取相关歌手，按平台保留身份，用名称占位而不把歌曲封面当作歌手头像；点击后按平台与歌手名称筛选歌曲。同名歌手仍可能混合，数量仅代表本次搜索，不是全量作品数。
+
+`/status` 页面展示数据库、会话缓存、音源服务、附件存储和 AI 状态。默认后端为 **18080**，避免与其他项目的 8080 冲突；启动脚本检查应用标识、API 版本和依赖状态。
+
+数据库启动时自动检查当前版本结构，记录在 `fmp_schema_history`。升级前备份：
+
+```powershell
+.\scripts\backup-db.ps1
+# 恢复会覆盖数据，先停止后端并确认备份：
+.\scripts\restore-db.ps1 -BackupPath .runtime\backups\你的备份.sql -ConfirmRestore
+```
 
 ## 在线平台账号授权（可选）
 
@@ -208,9 +243,9 @@ docker compose -f compose.dev.yml ps
 
 然后查看 `.runtime/logs/backend.out.log`。本仓库的启动脚本会显式加载 `config/application-docker.yml`，Docker MySQL 使用主机端口 `13306`，避免误连本机已有的 `3306`。
 
-### IDEA 提示 8080 已被占用
+### IDEA 提示端口已被占用
 
-说明脚本已经启动了一个后端。使用脚本启动时不要再从 IDEA 重复运行 `VibeMusicServerApplication`。
+确认占用端口的应用是否为 FreeMusicPlayer，其他项目也可能使用同一端口。当前开发 API 默认 18080。使用脚本启动时不要再从 IDEA 重复运行 `VibeMusicServerApplication`。
 
 ### Docker Desktop 中出现随机名称的 0 Bytes 卷
 
@@ -228,7 +263,7 @@ docker compose -f compose.dev.yml ps
 | 后端 | Spring Boot 3.5、Java 17+、Maven 多模块 |
 | 数据 | MyBatis-Plus、MySQL 8、Druid、Redis 7 |
 | 文件存储 | MinIO / S3 兼容对象存储 |
-| AI | Spring AI、Spring AI Alibaba、DashScope |
+| AI | Spring AI、Ollama、Spring AI Alibaba、DashScope |
 | 在线音乐 | Node.js、@meting/core、独立 go-music-api 服务 |
 
 ## 开源说明

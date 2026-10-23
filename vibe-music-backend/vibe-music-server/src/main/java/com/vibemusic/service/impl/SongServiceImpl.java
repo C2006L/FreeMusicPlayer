@@ -19,6 +19,7 @@ import com.vibemusic.result.Result;
 import com.vibemusic.service.ISongService;
 import com.vibemusic.service.MinioService;
 import com.vibemusic.util.JwtUtil;
+import com.vibemusic.service.SessionService;
 import com.vibemusic.util.TypeConversionUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
@@ -54,6 +55,8 @@ import java.util.stream.Collectors;
 @Slf4j
 @CacheConfig(cacheNames = "songCache")
 public class SongServiceImpl extends ServiceImpl<SongMapper, Song> implements ISongService {
+    @Autowired
+    private SessionService sessions;
 
     @Resource
     private SongMapper songMapper;
@@ -147,7 +150,6 @@ public class SongServiceImpl extends ServiceImpl<SongMapper, Song> implements IS
      * @return 歌曲列表
      */
     @Override
-    @Cacheable(key = "#songDTO.pageNum + '-' + #songDTO.pageSize + '-' + #songDTO.songName + '-' + #songDTO.artistName + '-' + #songDTO.album")
     public Result<PageResult<SongVO>> getAllSongs(SongDTO songDTO, HttpServletRequest request) {
         // 获取请求头中的 token
         String token = request.getHeader("Authorization");
@@ -157,7 +159,7 @@ public class SongServiceImpl extends ServiceImpl<SongMapper, Song> implements IS
 
         Map<String, Object> map = null;
         if (token != null && !token.isEmpty()) {
-            map = JwtUtil.parseToken(token);
+            map = sessions.optional(token);
         }
 
         // 查询歌曲列表
@@ -238,7 +240,7 @@ public class SongServiceImpl extends ServiceImpl<SongMapper, Song> implements IS
 
         Map<String, Object> map = null;
         if (token != null && !token.isEmpty()) {
-            map = JwtUtil.parseToken(token);
+            map = sessions.optional(token);
         }
 
         // 用户未登录，返回随机歌曲列表
@@ -319,7 +321,6 @@ public class SongServiceImpl extends ServiceImpl<SongMapper, Song> implements IS
      * @return 歌曲详情
      */
     @Override
-    @Cacheable(key = "#songId")
     public Result<SongDetailVO> getSongDetail(Long songId, HttpServletRequest request) {
         SongDetailVO songDetailVO = songMapper.getSongDetailById(songId);
 
@@ -331,7 +332,7 @@ public class SongServiceImpl extends ServiceImpl<SongMapper, Song> implements IS
 
         Map<String, Object> map = null;
         if (token != null && !token.isEmpty()) {
-            map = JwtUtil.parseToken(token);
+            map = sessions.optional(token);
         }
 
         // 如果 token 解析成功且用户为登录状态，进一步操作

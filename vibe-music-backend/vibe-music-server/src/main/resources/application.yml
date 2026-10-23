@@ -1,3 +1,11 @@
+server:
+  port: ${FMP_BACKEND_PORT:18080}
+  servlet:
+    session:
+      timeout: 30m
+      cookie:
+        http-only: true
+        same-site: lax
 spring:
   profiles:
   # 激活的dev配置文件,可按需切换
@@ -35,29 +43,47 @@ spring:
   # 配置邮件服务
   mail:
     # 配置邮箱账户和密码
-    host: ${vibe-music.mail.host} # 修改你的 SMTP 服务器地址
-    username: ${vibe-music.mail.username} # 修改你的邮箱账号
-    password: ${vibe-music.mail.password} # 修改你的邮箱应用密码或授权码
+    host: ${SMTP_HOST:localhost}
+    port: ${SMTP_PORT:1025}
+    username: ${SMTP_USERNAME:freemusicplayer@localhost}
+    password: ${SMTP_PASSWORD:}
     protocol: smtp
     properties:
       mail:
         smtp:
-          auth: true
+          auth: ${SMTP_AUTH:false}
           starttls:
-            enable: true
-            required: true
+            enable: ${SMTP_STARTTLS:false}
+            required: ${SMTP_STARTTLS:false}
           ssl:
-            enable: true
-          socketFactory:
-            port: 465
-            class: javax.net.ssl.SSLSocketFactory
+            enable: ${SMTP_SSL:false}
           # 邮件服务超时时间配置
           connectiontimeout: 5000
           timeout: 3000
           writetimeout: 5000
   ai:
+    chat:
+      client:
+        enabled: false
+    model:
+      chat: ${FMP_AI_PROVIDER:ollama}
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://127.0.0.1:11434}
+      init:
+        pull-model-strategy: never
+      chat:
+        options:
+          model: ${OLLAMA_MODEL:qwen2.5:3b}
+          temperature: 0.4
+          num-ctx: 8192
+          num-predict: 1024
+    retry:
+      max-attempts: 1
     dashscope:
-      api-key: ${vibe-music.ai.dashscope.api-key}
+      api-key: ${DASHSCOPE_API_KEY:not-configured}
+      chat:
+        options:
+          incremental-output: true
 
 security:
   jwt:
@@ -70,7 +96,7 @@ mybatis-plus:
   type-aliases-package: cn.edu.seig.pojo # 实体类所在的包，允许用实体类类名作为别名
 
   configuration:
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl # 配置日志
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
     map-underscore-to-camel-case: true # 类属性与表字段的驼峰映射
 
   global-config:
@@ -103,4 +129,4 @@ minio:
 vibe-music:
   online:
     provider-url: ${VIBE_MUSIC_PROVIDER_URL:http://127.0.0.1:3001}
-    provider-public-url: ${VIBE_MUSIC_PROVIDER_PUBLIC_URL:http://127.0.0.1:8080/song}
+    provider-public-url: ${VIBE_MUSIC_PROVIDER_PUBLIC_URL:http://localhost:18080/song}

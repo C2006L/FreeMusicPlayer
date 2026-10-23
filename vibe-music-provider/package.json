@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Multi-source music search sidecar for FreeMusicPlayer",
   "scripts": {
+    "test": "node --test *.test.mjs",
     "start": "node server.mjs",
     "dev": "node --watch server.mjs"
   },

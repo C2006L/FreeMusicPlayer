@@ -95,10 +95,11 @@ export const getAllSongs = (data: object) => {
 }
 
 /** 聚合搜索在线曲库 */
-export const searchOnlineSongs = (keyword: string, sources?: string[], limit = 20) => {
+export const searchOnlineSongs = (keyword: string, sources?: string[], limit = 20, signal?: AbortSignal) => {
   return http<Result>('get', '/song/searchOnline', {
     params: { keyword, sources, limit },
     paramsSerializer: { indexes: null },
+    signal,
   })
 }
 

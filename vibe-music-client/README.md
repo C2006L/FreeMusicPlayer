@@ -28,7 +28,7 @@ pnpm install
 pnpm dev
 ```
 
-默认访问地址为 <http://localhost:8090>，后端默认位于 <http://localhost:8080>。
+默认访问地址为 <http://localhost:8090>，后端默认位于 <http://localhost:18080>。API 地址可通过 `VITE_APP_BASE_API` 设置。
 
 ## 验证
 

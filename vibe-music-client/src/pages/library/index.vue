@@ -2,6 +2,7 @@
 import { getAllSongs, searchOnlineSongs } from '@/api/system'
 import { ElMessage } from 'element-plus'
 import { useLibraryStore } from '@/stores/modules/library'
+import { artistNames, normalizeArtist } from '@/utils/artists'
 
 const route = useRoute()
 const libraryStore = useLibraryStore()
@@ -23,6 +24,8 @@ const onlineQuery = ref('')
 const searchingOnline = ref(false)
 const loading = ref(false)
 const loadError = ref('')
+let requestId = 0
+let controller: AbortController | undefined
 
 const state = reactive({
     size: 'default',
@@ -43,15 +46,21 @@ const handleCurrentChange = () => {
 }
 
 const getSongs = async () => {
+    const id = ++requestId
+    controller?.abort()
+    controller = new AbortController()
     loading.value = true
     loadError.value = ''
     libraryStore.setTableData(null)
     const keyword = (route.query.query as string || '').trim()
+    const artist = String(route.query.artist || '')
+    const source = String(route.query.source || '')
+    const queryKey = JSON.stringify([keyword, artist, source])
     const localRequest = getAllSongs({
         pageNum: currentPage.value,
         pageSize: pageSize.value,
-        songName: keyword,
-        artistName: '',
+        songName: artist ? '' : keyword,
+        artistName: artist,
         album: '',
     })
 
@@ -60,52 +69,56 @@ const getSongs = async () => {
       onlineQuery.value = ''
       onlineTotal.value = 0
     }
-    const needsOnlineSearch = Boolean(keyword && onlineQuery.value !== keyword)
+    const needsOnlineSearch = Boolean(keyword && onlineQuery.value !== queryKey)
     searchingOnline.value = needsOnlineSearch
     const onlineRequest = needsOnlineSearch
-        ? searchOnlineSongs(keyword, undefined, 20).catch(() => null)
+        ? searchOnlineSongs(keyword, source && source !== 'local' ? [source] : undefined, 50, controller.signal)
         : Promise.resolve(null)
     try {
-      const [local, online] = await Promise.all([localRequest, onlineRequest])
-      if (local.code === 0 && local.data) {
+      const [localResult, onlineResult] = await Promise.allSettled([localRequest, onlineRequest])
+      if (id !== requestId) return
+      const local = localResult.status === 'fulfilled' ? localResult.value : null
+      const online = onlineResult.status === 'fulfilled' ? onlineResult.value : null
+      if (local?.code === 0 || online?.code === 0 || !needsOnlineSearch && onlineResults.value.length) {
         if (needsOnlineSearch) {
           onlineResults.value = online?.code === 0 && Array.isArray(online.data) ? online.data : []
-          onlineQuery.value = online?.code === 0 ? keyword : ''
+          if (artist) onlineResults.value = onlineResults.value.filter(song => artistNames(song.artistName || '').some(name => normalizeArtist(name) === normalizeArtist(artist)))
+          onlineQuery.value = online?.code === 0 ? queryKey : ''
         }
-        localTotal.value = local.data.total || 0
+        localTotal.value = source && source !== 'local' ? 0 : local?.data?.total || 0
         onlineTotal.value = onlineResults.value.length
         state.total = localTotal.value + onlineTotal.value
         const offset = (currentPage.value - 1) * pageSize.value
-        const localItems = local.data.items || []
+        const localItems = source && source !== 'local' ? [] : local?.data?.items || []
         const onlineOffset = Math.max(0, offset - localTotal.value)
         const onlineItems = onlineResults.value.slice(onlineOffset, onlineOffset + Math.max(0, pageSize.value - localItems.length))
         libraryStore.setTableData({
-            ...local.data,
+            ...local?.data,
             items: [...localItems, ...onlineItems],
         })
-        if (online && online.code !== 0) ElMessage.warning(online.message)
+        if (needsOnlineSearch && online?.code !== 0) ElMessage.warning('在线搜索暂时失败，已显示可用的本地结果')
       } else {
-        loadError.value = local.message || '曲库加载失败'
+        loadError.value = online?.message || local?.message || '曲库服务无法连接，请重试'
       }
     } catch (error: any) {
-      loadError.value = error?.message || '无法连接音乐服务'
+      if (id === requestId) loadError.value = error?.message || '无法连接音乐服务'
     } finally {
-      searchingOnline.value = false
-      loading.value = false
+      if (id === requestId) { searchingOnline.value = false; loading.value = false }
     }
 }
 
 watch(
-    () => [route.query.query, props.selected],
+    () => [route.query.query, props.selected, route.query.artist, route.query.source],
     (val, previous) => {
         if (!val[1] || val[1] != '1') return
-        if (previous && val[0] !== previous[0]) currentPage.value = 1
+        if (previous && val.join() !== previous.join()) currentPage.value = 1
         getSongs()
     },
     {
         immediate: true,
     }
 )
+onUnmounted(() => { requestId++; controller?.abort() })
 </script>
 
 <template>
@@ -113,7 +126,8 @@ watch(
         <div class="mb-5 flex items-end justify-between border-b border-border pb-4">
           <div>
             <p class="mb-1 text-[10px] font-semibold tracking-[0.2em] text-primary">LIBRARY</p>
-            <h1 class="text-2xl font-semibold">{{ route.query.query ? `“${route.query.query}” 的搜索结果` : '曲库' }}</h1>
+            <h1 class="text-2xl font-semibold">{{ route.query.artist ? `${route.query.artist} · 相关歌曲` : route.query.query ? `“${route.query.query}” 的搜索结果` : '曲库' }}</h1>
+            <p v-if="route.query.artist" class="mt-2 text-xs text-muted-foreground">已按平台与歌手名称筛选；同名歌手仍可能出现。</p>
           </div>
           <div v-if="route.query.query" class="text-xs text-muted-foreground">
             本地 {{ localTotal }} 首

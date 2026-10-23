@@ -59,12 +59,6 @@ public class UserController {
             return Result.error(errorMessage);
         }
 
-        // 验证验证码是否正确
-        boolean isCodeValid = userService.verifyVerificationCode(userRegisterDTO.getEmail(), userRegisterDTO.getVerificationCode());
-        if (!isCodeValid) {
-            return Result.error(MessageConstant.VERIFICATION_CODE + MessageConstant.INVALID);
-        }
-
         return userService.register(userRegisterDTO);
     }
 
@@ -156,12 +150,6 @@ public class UserController {
         String errorMessage = BindingResultUtil.handleBindingResultErrors(bindingResult);
         if (errorMessage != null) {
             return Result.error(errorMessage);
-        }
-
-        // 验证验证码是否正确
-        boolean isCodeValid = userService.verifyVerificationCode(userResetPasswordDTO.getEmail(), userResetPasswordDTO.getVerificationCode());
-        if (!isCodeValid) {
-            return Result.error(MessageConstant.VERIFICATION_CODE + MessageConstant.INVALID);
         }
 
         return userService.resetUserPassword(userResetPasswordDTO);

@@ -23,7 +23,8 @@ if (-not (Test-Path $goMusicCookies)) { Set-Content -Path $goMusicCookies -Value
 $jwtSecretFile = Join-Path $runtimeRoot 'jwt-secret.txt'
 if (-not (Test-Path $jwtSecretFile)) {
     $secretBytes = New-Object byte[] 48
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($secretBytes)
+    $random = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $random.GetBytes($secretBytes) } finally { $random.Dispose() }
     [System.IO.File]::WriteAllText($jwtSecretFile, [Convert]::ToBase64String($secretBytes))
 }
 $env:VIBE_MUSIC_JWT_SECRET = ([System.IO.File]::ReadAllText($jwtSecretFile)).Trim()

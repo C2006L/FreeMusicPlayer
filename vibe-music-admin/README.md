@@ -40,7 +40,7 @@ pnpm install
 pnpm dev
 ```
 
-后端默认地址为 <http://localhost:8080>。开发代理配置位于项目的 Vite 配置和环境文件中。
+后端默认地址为 <http://localhost:18080>，可通过 `VITE_APP_BASE_API` 修改。开发代理配置位于项目的 Vite 配置和环境文件中。
 
 ## 验证
 

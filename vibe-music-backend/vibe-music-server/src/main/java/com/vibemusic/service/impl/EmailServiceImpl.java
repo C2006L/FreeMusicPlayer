@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.javamail.JavaMailSenderImpl;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
+import org.springframework.mail.MailException;
 
 /**
  * <p>
@@ -41,14 +42,14 @@ public class EmailServiceImpl implements EmailService {
     public boolean sendEmail(String to, String subject, String content) {
         MimeMessage mimeMessage = mailSender.createMimeMessage();
         try {
-            MimeMessageHelper helper = new MimeMessageHelper(mimeMessage);
+            MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, "UTF-8");
             helper.setFrom(from);
             helper.setTo(to);
             helper.setSubject(subject);
             helper.setText(content);
             mailSender.send(mimeMessage);
             return true;
-        } catch (MessagingException e) {
+        } catch (MessagingException | MailException e) {
             log.error(MessageConstant.EMAIL_SEND_FAILED, e);
             return false;
         }

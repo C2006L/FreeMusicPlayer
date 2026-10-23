@@ -19,6 +19,7 @@ import com.vibemusic.result.Result;
 import com.vibemusic.service.IPlaylistService;
 import com.vibemusic.service.MinioService;
 import com.vibemusic.util.JwtUtil;
+import com.vibemusic.service.SessionService;
 import com.vibemusic.util.TypeConversionUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
@@ -49,6 +50,8 @@ import java.util.stream.Collectors;
 @Service
 @CacheConfig(cacheNames = "playlistCache")
 public class PlaylistServiceImpl extends ServiceImpl<PlaylistMapper, Playlist> implements IPlaylistService {
+    @Autowired
+    private SessionService sessions;
 
     @Autowired
     private PlaylistMapper playlistMapper;
@@ -142,7 +145,7 @@ public class PlaylistServiceImpl extends ServiceImpl<PlaylistMapper, Playlist> i
 
         Map<String, Object> map = null;
         if (token != null && !token.isEmpty()) {
-            map = JwtUtil.parseToken(token);
+            map = sessions.optional(token);
         }
 
         Long userId = null;
@@ -204,7 +207,6 @@ public class PlaylistServiceImpl extends ServiceImpl<PlaylistMapper, Playlist> i
      * @return 歌单详情
      */
     @Override
-    @Cacheable(key = "#playlistId")
     public Result<PlaylistDetailVO> getPlaylistDetail(Long playlistId, HttpServletRequest request) {
         PlaylistDetailVO playlistDetailVO = playlistMapper.getPlaylistDetailById(playlistId);
         if (playlistDetailVO == null) {
@@ -223,7 +225,7 @@ public class PlaylistServiceImpl extends ServiceImpl<PlaylistMapper, Playlist> i
 
         Map<String, Object> map = null;
         if (token != null && !token.isEmpty()) {
-            map = JwtUtil.parseToken(token);
+            map = sessions.optional(token);
         }
 
         // 如果 token 解析成功且用户为登录状态，进一步操作

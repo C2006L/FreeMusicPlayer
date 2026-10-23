@@ -2,8 +2,7 @@ import { trackModel } from '@/stores/interface'
 import { defaultSong } from '@/mock'
 import { ElNotification } from 'element-plus'
 import { PlayMode } from './interface'
-import { urlV1 } from '@/api'
-import { searchOnlineSongs } from '@/api/system'
+import { searchOnlineSongs, getSongDetail } from '@/api/system'
 interface AudioPlayer {
   isPlaying: Ref<boolean>
   currentTrack: ComputedRef<trackModel>
@@ -32,7 +31,7 @@ export const AudioPlayer = () => {
   const audioStore = AudioStore()
   const audioElement = ref<HTMLAudioElement | null>(null)
   const isPlaying = ref(false)
-  const volume = ref(audioStore.volume || 50)
+  const volume = ref(audioStore.volume ?? 50)
   const playMode = ref<PlayMode>(audioStore.playMode || 'order')
 
   // 当前播放的歌曲
@@ -45,6 +44,7 @@ export const AudioPlayer = () => {
   const isSeeking = ref(false)
   const fallbackAttempts = new Map<string, Set<string>>()
   let fallbackInProgress = false
+  let loadGeneration = 0
 
   const onlineSources = [
     'netease', 'qq', 'kugou', 'kuwo', 'migu', 'qianqian',
@@ -84,9 +84,11 @@ export const AudioPlayer = () => {
   // 播放音乐
   const play = async () => {
     if (!audioElement.value || !currentTrack.value.url) return
+    const requestedTrack = currentTrack.value
     try {
       await audioElement.value.play()
     } catch (error) {
+      if (requestedTrack !== currentTrack.value || error instanceof DOMException && error.name === 'AbortError') return
       if (error instanceof DOMException && error.name === 'NotAllowedError') {
         ElNotification({
           title: '浏览器已阻止自动播放',
@@ -193,8 +195,11 @@ export const AudioPlayer = () => {
 
   // 加载当前歌曲
   const loadTrack = async () => {
+    const generation = ++loadGeneration
+    const track = currentTrack.value
     // 检查歌曲 URL
     await checkUrl()
+    if (generation !== loadGeneration || track !== currentTrack.value) return
     // 歌词是否存在
     // checkLyrics()
 
@@ -216,13 +221,16 @@ export const AudioPlayer = () => {
     // 查看歌曲 URL 是否存在
     if (!currentTrack.value.url) {
       // 如果 currentTrack 的 url 不存在，则获取 URL
-      const response = await urlV1(currentTrack.value.id)
-      const url = response.data[0]?.url // 获取第一个 URL
+      const track = currentTrack.value
+      const id = Number(track.id)
+      if (!Number.isFinite(id)) return
+      const response = await getSongDetail(id)
+      const url = (response.data as unknown as { audioUrl?: string })?.audioUrl
 
       if (!url) return
       // 更新 trackList 中的对应歌曲的 url
       const trackIndex = audioStore.trackList.findIndex(
-        (track: { id: any }) => track.id === currentTrack.value.id
+        (item: { id: any }) => item.id === track.id
       )
       if (trackIndex !== -1) {
         audioStore.trackList[trackIndex].url = url // 更新 URL
@@ -344,6 +352,8 @@ export const AudioPlayer = () => {
             availability: candidate.availability,
             vip: candidate.vip,
             online: true,
+            lyric: undefined,
+            translatedLyric: undefined,
             playbackStatus: undefined,
           })
           await loadTrack()
@@ -360,7 +370,7 @@ export const AudioPlayer = () => {
         remainingSources.forEach((source) => attempts.add(source))
       }
 
-      track.playbackStatus = reason.includes('30 秒') ? 'preview' : undefined
+      track.playbackStatus = reason.includes('30 秒') ? 'preview' : 'error'
       ElNotification({
         title: reason.includes('30 秒') ? '该歌曲仅提供试听' : '播放失败',
         message: '已检查其他平台，暂未找到可正常播放的同一首歌曲。',
@@ -368,7 +378,7 @@ export const AudioPlayer = () => {
       })
       return false
     } catch {
-      track.playbackStatus = reason.includes('30 秒') ? 'preview' : undefined
+      track.playbackStatus = reason.includes('30 秒') ? 'preview' : 'error'
       ElNotification({
         title: '切换音源失败',
         message: '在线音源服务暂时无法连接，请稍后重试。',
@@ -382,6 +392,11 @@ export const AudioPlayer = () => {
 
   const handlePlaybackFailure = async (reason = '当前音源无法播放') => {
     isPlaying.value = false
+    if (!isOnlineTrack(currentTrack.value)) {
+      currentTrack.value.playbackStatus = 'error'
+      ElNotification({ title: '播放失败', message: '本地音频不存在或无法读取，请检查附件存储。', type: 'warning' })
+      return
+    }
     await tryAlternative(reason, true)
   }
 
@@ -432,7 +447,7 @@ export const AudioPlayer = () => {
   // 组件挂载时初始化音频元素
   onMounted(() => {
     audioElement.value = new Audio(currentTrack.value.url)
-    volume.value = audioStore.volume || 50
+    volume.value = audioStore.volume ?? 50
     audioElement.value.volume = volume.value / 100
     // 歌词是否存在
     // checkLyrics()

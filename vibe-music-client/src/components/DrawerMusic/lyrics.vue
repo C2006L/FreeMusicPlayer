@@ -8,6 +8,7 @@ const lines = ref<LyricLine[]>([])
 const loading = ref(false)
 const error = ref('')
 const scrollArea = ref<HTMLElement | null>(null)
+let requestId = 0
 
 const parseLrc = (value = ''): LyricLine[] => {
   const parsed: LyricLine[] = []
@@ -38,8 +39,10 @@ const activeIndex = computed(() => {
 watch(
   () => [currentTrack.value.id, currentTrack.value.sourceLyricId, currentTrack.value.lyric],
   async () => {
+    const id = ++requestId
     lines.value = []
     error.value = ''
+    loading.value = false
     const track = currentTrack.value
     if (track.lyric) {
       lines.value = mergeTranslation(parseLrc(track.lyric), track.translatedLyric)
@@ -53,14 +56,15 @@ watch(
           duration: track.duration, extra: track.sourceExtra, engine: track.providerEngine,
         })
         const payload = result.data as { lyric?: string; tlyric?: string } | undefined
+        if (id !== requestId) return
         if (result.code !== 0 || !payload?.lyric) throw new Error(result.message || '暂无歌词')
         track.lyric = payload.lyric
         track.translatedLyric = payload.tlyric || ''
         lines.value = mergeTranslation(parseLrc(payload.lyric), payload.tlyric)
       } catch (reason: any) {
-        error.value = reason?.message || '暂未找到这首歌的歌词'
+        if (id === requestId) error.value = reason?.message || '暂未找到这首歌的歌词'
       } finally {
-        loading.value = false
+        if (id === requestId) loading.value = false
       }
       return
     }
@@ -68,6 +72,7 @@ watch(
   },
   { immediate: true },
 )
+onUnmounted(() => { requestId++ })
 
 watch(activeIndex, async () => {
   await nextTick()

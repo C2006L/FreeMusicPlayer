@@ -39,4 +39,4 @@ export const extractVibeSongs = (text: string): VibeSong[] => {
 
 /** 去掉回复文本中的 <vibe-songs> 标签，只保留正文 */
 export const stripVibeSongsTag = (text: string): string =>
-  text.replace(VIBE_SONGS_TAG, '').trim()
+  text.replace(VIBE_SONGS_TAG, '').replace(/<vibe-songs>[\s\S]*$/, '').trim()

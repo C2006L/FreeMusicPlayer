@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { nextTick, reactive, ref } from 'vue'
+import { nextTick, reactive, ref, onUnmounted, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import { ElMessage } from 'element-plus'
-import { streamAgentChat } from '@/api/agent'
-import { getSongDetail } from '@/api/system'
-import { SongDetail } from '@/api/interface'
-import { extractVibeSongs, stripVibeSongsTag, VibeSong } from '@/utils/agent'
+import { streamAgentChat, getAgentStatus, cancelAgentChat } from '@/api/agent'
+import type { Song } from '@/api/interface'
+import { stripVibeSongsTag } from '@/utils/agent'
+import { songToTrack } from '@/utils/songTrack'
 import { useAudioPlayer } from '@/hooks/useAudioPlayer'
 import MdView from '@/components/Agent/MdView.vue'
 import default_album from '@/assets/default_album.jpg'
@@ -13,7 +13,7 @@ import default_album from '@/assets/default_album.jpg'
 interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
-  songs: VibeSong[]
+  songs: Song[]
   loading?: boolean
 }
 
@@ -25,13 +25,23 @@ const input = ref('')
 const messages = ref<ChatMessage[]>([])
 const messageListEl = ref<HTMLElement | null>(null)
 const streaming = ref(false)
+const cancelling = ref(false)
+const serviceLabel = ref('正在检查 AI 服务')
+let generation = 0
 let abortController: AbortController | null = null
 
 // 会话 id 持久化，刷新页面后仍能延续对话记忆
 const conversationId = ref(
-  localStorage.getItem('vibe-agent-conversation-id') || crypto.randomUUID()
+  sessionStorage.getItem('fmp-agent-conversation-id') || crypto.randomUUID()
 )
-localStorage.setItem('vibe-agent-conversation-id', conversationId.value)
+sessionStorage.setItem('fmp-agent-conversation-id', conversationId.value)
+
+watch(open, async (value) => {
+  if (!value) return
+  try { const status = await getAgentStatus(); serviceLabel.value = status.configured ? `${status.provider} · ${status.model}` : status.message }
+  catch (error: any) { serviceLabel.value = error.message }
+})
+onUnmounted(() => abortController?.abort())
 
 const suggestions = [
   '推荐几首摇滚歌曲',
@@ -48,7 +58,7 @@ const scrollToBottom = async () => {
 
 const send = async () => {
   const text = input.value.trim()
-  if (!text || streaming.value) return
+  if (!text || streaming.value || cancelling.value) return
 
   input.value = ''
   messages.value.push({ role: 'user', content: text, songs: [] })
@@ -63,6 +73,7 @@ const send = async () => {
   messages.value.push(assistantMsg)
   streaming.value = true
   abortController = new AbortController()
+  const requestGeneration = ++generation
   await scrollToBottom()
 
   try {
@@ -70,64 +81,59 @@ const send = async () => {
       conversationId.value,
       text,
       (delta) => {
+        if (requestGeneration !== generation) return
         assistantMsg.content += delta
-        assistantMsg.songs = extractVibeSongs(assistantMsg.content)
         scrollToBottom()
       },
-      abortController.signal
+      abortController.signal,
+      (songs) => { if (requestGeneration === generation) assistantMsg.songs = songs }
     )
   } catch (error: any) {
     if (error.name !== 'AbortError') {
-      assistantMsg.content =
-        assistantMsg.content || '抱歉，请求失败了，请稍后再试。'
-      ElMessage.error('请求失败，请检查网络或服务状态')
+      assistantMsg.content += `\n\n${error?.message || 'AI 服务暂时无法连接，请稍后重试。'}`
+      ElMessage.error(error?.message || 'AI 请求失败')
     }
   } finally {
     assistantMsg.loading = false
-    assistantMsg.songs = extractVibeSongs(assistantMsg.content)
-    streaming.value = false
-    abortController = null
+    if (requestGeneration === generation) {
+      streaming.value = false
+      abortController = null
+      if (!assistantMsg.content) assistantMsg.content = '本次生成已停止。'
+    }
     await scrollToBottom()
   }
 }
 
 // 播放推荐歌曲：加入播放队列并立即播放
-const playSong = async (song: VibeSong) => {
+const playSong = async (song: Song) => {
   try {
-    // 模型输出的 <vibe-songs> 有时会缺 audioUrl，缺了就回源取歌曲详情
-    let audioUrl = song.audioUrl
-    if (!audioUrl) {
-      const res = await getSongDetail(song.songId)
-      audioUrl = (res.data as unknown as SongDetail | undefined)?.audioUrl
-    }
-    if (!audioUrl) {
+    if (!song.audioUrl) {
       ElMessage.warning('该歌曲暂无播放资源')
       return
     }
-    audio.addTracks({
-      id: song.songId.toString(),
-      title: song.songName,
-      artist: song.artistName,
-      album: song.album,
-      cover: song.coverUrl || default_album,
-      url: audioUrl,
-      duration: Number(song.duration) || 0,
-      likeStatus: song.likeStatus || 0,
-    })
+    audio.addTracks(songToTrack(song))
     await loadTrack()
-    play()
-    ElMessage.success(`正在播放：${song.songName} - ${song.artistName}`)
+    await play()
   } catch {
     ElMessage.error('播放失败，请重试')
   }
 }
 
 // 新建会话：清空记忆与聊天记录
-const newConversation = () => {
-  if (abortController) abortController.abort()
+const stopGenerating = async () => {
+  cancelling.value = true
+  abortController?.abort()
+  try { await cancelAgentChat() } catch { /* Local abort remains available if the server is offline. */ }
+  finally { abortController?.abort(); cancelling.value = false }
+}
+const newConversation = async () => {
+  if (streaming.value) await stopGenerating()
+  generation++
+  streaming.value = false
+  abortController = null
   messages.value = []
   conversationId.value = crypto.randomUUID()
-  localStorage.setItem('vibe-agent-conversation-id', conversationId.value)
+  sessionStorage.setItem('fmp-agent-conversation-id', conversationId.value)
   ElMessage.success('已开启新会话')
 }
 </script>
@@ -167,13 +173,15 @@ const newConversation = () => {
           <div class="font-serif-display font-bold tracking-tight">
             FreeMusic Assistant
           </div>
-          <div class="text-xs text-muted-foreground">你的私人音乐向导</div>
+          <div class="text-xs text-muted-foreground">{{ serviceLabel }}</div>
         </div>
         <div class="ml-auto flex items-center gap-1">
           <el-tooltip content="新会话" placement="bottom">
             <button
               class="p-2 rounded-lg text-muted-foreground hover:text-primary hover:bg-hoverMenuBg transition-all duration-300"
               @click="newConversation"
+              aria-label="新会话"
+              :disabled="cancelling"
             >
               <Icon icon="mdi:chat-plus-outline" class="text-lg" />
             </button>
@@ -314,11 +322,13 @@ const newConversation = () => {
             type="text"
             class="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             placeholder="告诉我你想听什么..."
-            @keyup.enter="send"
+            maxlength="2000"
+            @keyup.enter="!$event.isComposing && send()"
           />
+          <button v-if="streaming" class="text-xs text-primary shrink-0" :disabled="cancelling" @click="stopGenerating" aria-label="停止生成">{{ cancelling ? '停止中' : '停止' }}</button>
           <button
             class="w-8 h-8 rounded-lg bg-primary text-white flex items-center justify-center transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed hover:scale-105 flex-shrink-0"
-            :disabled="streaming || !input.trim()"
+            :disabled="streaming || cancelling || !input.trim()"
             aria-label="发送"
             @click="send"
           >
@@ -326,7 +336,7 @@ const newConversation = () => {
           </button>
         </div>
         <div class="text-[10px] text-muted-foreground/70 text-center mt-1.5">
-          FreeMusic Assistant 由通义千问驱动，推荐结果来自真实曲库
+          推荐来自在线查询，播放能力以实际音源为准
         </div>
       </div>
     </div>

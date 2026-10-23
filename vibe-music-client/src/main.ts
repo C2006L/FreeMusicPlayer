@@ -9,6 +9,9 @@ import 'element-plus/theme-chalk/dark/css-vars.css'
 import './style/index.scss'
 import vReveal from './directives/reveal'
 const app = createApp(App)
+// Credentials from versions before sessionStorage migration must not linger.
+localStorage.removeItem('UserStore')
+localStorage.removeItem('vibe-agent-conversation-id')
 
 // 滚动渐入指令
 app.directive('reveal', vReveal)

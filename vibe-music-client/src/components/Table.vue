@@ -6,6 +6,7 @@ import { formatTime } from '@/utils'
 import { cancelCollectSong, collectSong, importOnlineSong } from '@/api/system'
 import { ElMessage } from 'element-plus'
 import { UserStore } from '@/stores/modules/user'
+import { songToTrack } from '@/utils/songTrack'
 
 const props = defineProps({
   data: { type: Array as PropType<Song[]>, default: () => [] },
@@ -26,16 +27,7 @@ const handleCoverError = (event: Event) => {
 watch(() => props.data, (songs) => audio.setCurrentPageSongs(songs), { immediate: true })
 
 const songKey = (song: Song) => String(song.sourceSongId ? `${song.source || 'online'}:${song.sourceSongId}` : song.songId)
-const convertToTrack = (song: Song) => ({
-  id: String(song.songId), title: song.songName, artist: song.artistName,
-  album: song.album, cover: song.coverUrl || defaultAlbum, url: song.audioUrl,
-  duration: Number(song.duration) || 0, likeStatus: song.likeStatus || 0,
-  source: song.source, sourceName: song.sourceName, sourceSongId: song.sourceSongId,
-  sourceUrlId: song.sourceUrlId, sourcePicId: song.sourcePicId,
-  sourceLyricId: song.sourceLyricId, online: song.online,
-  sourceExtra: song.sourceExtra, providerEngine: song.providerEngine,
-  availability: song.availability, vip: song.vip,
-})
+const convertToTrack = songToTrack
 
 const handlePlay = async (song: Song) => {
   const tracks = props.data.map(convertToTrack).filter((track) => Boolean(track.url))

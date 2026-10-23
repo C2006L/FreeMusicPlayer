@@ -10,7 +10,7 @@ import { UserStore } from '@/stores/modules/user'
 import { ElMessage } from 'element-plus'
 
 const instance: AxiosInstance = axios.create({
-  baseURL: import.meta.env.VITE_APP_BASE_API || 'http://localhost:8080',
+  baseURL: import.meta.env.VITE_APP_BASE_API || 'http://localhost:18080',
   timeout: 20000, // 设置超时时间 20秒
   headers: {
     Accept: 'application/json, text/plain, */*',
@@ -64,6 +64,7 @@ instance.interceptors.response.use(
   (error) => {
     // 关闭进度条
     NProgress.done()
+    if (axios.isCancel(error)) return Promise.reject(error)
 
     if (error.response) {
       switch (error.response.status) {
@@ -81,7 +82,7 @@ instance.interceptors.response.use(
           ElMessage.error('没有权限')
           break
         case 404:
-          ElMessage.error('请求的资源不存在')
+          ElMessage.error('接口不存在，请检查后端地址和版本')
           break
         case 429:
           ElMessage.error(error.response.data?.message || '请求过于频繁，请稍后再试')

@@ -67,7 +67,7 @@ const togglePlayMode = () => {
         <div class="album">
           <img
             class="album-art rounded-md"
-            :src="songDetail?.coverUrl || currentTrack.cover || defaultAlbum"
+            :src="currentTrack.cover || songDetail?.coverUrl || defaultAlbum"
             :alt="songDetail?.songName || currentTrack.title"
             @error="handleCoverError"
           />

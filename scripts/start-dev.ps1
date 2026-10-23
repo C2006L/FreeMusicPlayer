@@ -1,6 +1,8 @@
 param(
     [switch]$WithoutAdmin,
-    [switch]$WithMinio
+    [switch]$WithMinio,
+    [switch]$WithMail,
+    [switch]$BackendOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -18,10 +20,13 @@ if (-not (Test-Path $goMusicCookies)) { Set-Content -Path $goMusicCookies -Value
 $jwtSecretFile = Join-Path $runtimeRoot 'jwt-secret.txt'
 if (-not (Test-Path $jwtSecretFile)) {
     $secretBytes = New-Object byte[] 48
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($secretBytes)
+    $random = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $random.GetBytes($secretBytes) } finally { $random.Dispose() }
     [System.IO.File]::WriteAllText($jwtSecretFile, [Convert]::ToBase64String($secretBytes))
 }
 $env:VIBE_MUSIC_JWT_SECRET = ([System.IO.File]::ReadAllText($jwtSecretFile)).Trim()
+$backendPort = if ($env:FMP_BACKEND_PORT) { [int]$env:FMP_BACKEND_PORT } else { 18080 }
+$env:VITE_APP_BASE_API = "http://localhost:$backendPort"
 
 function Wait-Port([int]$Port, [int]$TimeoutSeconds = 120) {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
@@ -48,7 +53,8 @@ function Start-ManagedProcess(
     $pidFile = Join-Path $pidRoot "$Name.pid"
     if (Test-Path $pidFile) {
         $oldPid = [int](Get-Content $pidFile -Raw)
-        if (Get-Process -Id $oldPid -ErrorAction SilentlyContinue) {
+        $existingProcess = Get-CimInstance Win32_Process -Filter "ProcessId=$oldPid" -ErrorAction SilentlyContinue
+        if ($existingProcess -and $existingProcess.CommandLine -like "*$WorkingDirectory*") {
             Write-Host "$Name is already running (PID $oldPid)."
             return
         }
@@ -62,6 +68,7 @@ function Start-ManagedProcess(
     Write-Host "Started $Name (PID $($process.Id))."
 }
 
+if (-not $BackendOnly) {
 if ($WithMinio) {
     Write-Host 'Starting MySQL, Redis and optional MinIO ...'
     docker compose -f (Join-Path $projectRoot 'compose.dev.yml') --profile media up -d
@@ -75,10 +82,15 @@ Wait-Port 13306
 Wait-Port 6379
 Wait-Port 3002 120
 if ($WithMinio) { Wait-Port 9000 }
+if ($WithMail) {
+    docker compose -f (Join-Path $projectRoot 'compose.dev.yml') --profile mail up -d mailpit
+    if ($LASTEXITCODE -ne 0) { throw 'Local test mailbox failed to start.' }
+}
 
 $env:GO_MUSIC_API_URL = 'http://127.0.0.1:3002'
-Start-ManagedProcess 'provider' 'node.exe' @('server.mjs') (Join-Path $projectRoot 'vibe-music-provider')
+Start-ManagedProcess 'provider' 'node.exe' @((Join-Path $projectRoot 'vibe-music-provider\server.mjs')) (Join-Path $projectRoot 'vibe-music-provider')
 Wait-Port 3001 30
+}
 
 $backendDir = Join-Path $projectRoot 'vibe-music-backend\vibe-music-server'
 $backendJar = Join-Path $backendDir 'target\vibe-music-server-0.0.1-SNAPSHOT.jar'
@@ -97,7 +109,24 @@ Start-ManagedProcess 'backend' 'java.exe' @(
     "--spring.config.additional-location=$configUri",
     "--vibe-music.minio.enabled=$minioEnabled"
 ) $backendDir
-Wait-Port 8080 180
+Wait-Port $backendPort 180
+$healthDeadline = (Get-Date).AddSeconds(45)
+$healthy = $false
+do {
+    $health = $null
+    try { $health = Invoke-RestMethod "http://localhost:$backendPort/health" -TimeoutSec 10 } catch {
+        if ($_.Exception.Message -match '404') { throw "Port $backendPort has no FreeMusicPlayer health endpoint. Check the owning application." }
+    }
+    if ($health) {
+        if ($health.application -ne 'FreeMusicPlayer' -or $health.apiVersion -ne 2) {
+            throw "Port $backendPort is not running the expected FreeMusicPlayer API. Check the owning application."
+        }
+        if ($health.status -eq 'UP') { $healthy = $true; break }
+    }
+    Start-Sleep -Milliseconds 500
+} while ((Get-Date) -lt $healthDeadline)
+if (-not $healthy) { throw 'FreeMusicPlayer dependencies did not become ready. Open /health for details.' }
+if ($BackendOnly) { Write-Host "FreeMusicPlayer backend ready: http://localhost:$backendPort"; return }
 
 $clientVite = Join-Path $projectRoot 'vibe-music-client\node_modules\vite\bin\vite.js'
 Start-ManagedProcess 'client' 'node.exe' @($clientVite, '--host', '0.0.0.0') (Join-Path $projectRoot 'vibe-music-client')
@@ -113,7 +142,8 @@ Write-Host ''
 Write-Host 'FreeMusicPlayer is ready:' -ForegroundColor Green
 Write-Host '  User client:  http://localhost:8090'
 if (-not $WithoutAdmin) { Write-Host '  Admin client: http://localhost:8089' }
-Write-Host '  Backend API:  http://localhost:8080'
+Write-Host "  Backend API:  http://localhost:$backendPort"
 Write-Host '  Source API:   http://localhost:3002'
 if ($WithMinio) { Write-Host '  MinIO console:http://localhost:9001  (minioadmin / minioadmin)' }
+if ($WithMail) { Write-Host '  Test mailbox: http://localhost:8025 (local test emails only)' }
 Write-Host "  Logs:         $logRoot"

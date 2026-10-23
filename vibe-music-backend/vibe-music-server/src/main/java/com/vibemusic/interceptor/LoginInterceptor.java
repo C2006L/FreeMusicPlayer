@@ -7,6 +7,7 @@ import com.vibemusic.constant.MessageConstant;
 import com.vibemusic.constant.PathConstant;
 import com.vibemusic.util.JwtUtil;
 import com.vibemusic.util.ThreadLocalUtil;
+import com.vibemusic.service.SessionService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,6 +30,8 @@ public class LoginInterceptor implements HandlerInterceptor {
     private StringRedisTemplate stringRedisTemplate;
     @Autowired
     private RolePermissionManager rolePermissionManager;
+    @Autowired
+    private SessionService sessions;
 
     public void sendErrorResponse(HttpServletResponse response, int status, String message) throws IOException {
         response.setStatus(status);
@@ -74,7 +77,7 @@ public class LoginInterceptor implements HandlerInterceptor {
             // 仍尝试解析 token，以便在需要时提供用户态上下文（如收藏状态），无效则按匿名处理
             if (token != null && !token.isEmpty()) {
                 try {
-                    ThreadLocalUtil.set(JwtUtil.parseToken(token));
+                    ThreadLocalUtil.set(sessions.validate(token));
                 } catch (Exception ignored) {
                     // token 无效视为匿名用户
                 }
@@ -96,7 +99,7 @@ public class LoginInterceptor implements HandlerInterceptor {
                 throw new RuntimeException();
             }
 
-            Map<String, Object> claims = JwtUtil.parseToken(token);
+            Map<String, Object> claims = sessions.validate(token);
             String role = (String) claims.get(JwtClaimsConstant.ROLE);
             String requestURI = request.getRequestURI();
 
