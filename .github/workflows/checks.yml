@@ -33,9 +33,23 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: pnpm install --frozen-lockfile
+      - name: Install client dependencies
+        run: pnpm install --frozen-lockfile
         working-directory: vibe-music-client
-      - run: pnpm test && pnpm type-check && pnpm build
+      - name: Test client utilities
+        run: pnpm test
         working-directory: vibe-music-client
-      - run: pnpm install --frozen-lockfile && pnpm build
+      # Vite generates ignored src/auto-import/*.d.ts files. A fresh checkout
+      # must build before vue-tsc can resolve the project's auto-imported APIs.
+      - name: Build client and generate auto-import declarations
+        run: pnpm build
+        working-directory: vibe-music-client
+      - name: Type-check client after declaration generation
+        run: pnpm type-check
+        working-directory: vibe-music-client
+      - name: Install admin dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: vibe-music-admin
+      - name: Build admin
+        run: pnpm build
         working-directory: vibe-music-admin
