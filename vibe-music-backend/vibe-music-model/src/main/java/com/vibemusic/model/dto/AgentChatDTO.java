@@ -25,4 +25,7 @@ public class AgentChatDTO {
     @Size(max = 2000, message = "消息不能超过2000字")
     private String query;
 
+    /** Strict server-side filter, not a suggestion the language model may ignore. */
+    private boolean completeOnly;
+
 }
