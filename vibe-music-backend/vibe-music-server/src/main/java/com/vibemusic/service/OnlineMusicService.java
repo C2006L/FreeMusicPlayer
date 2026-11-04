@@ -23,11 +23,31 @@ import java.util.Set;
 
 @Service
 public class OnlineMusicService {
+    private final HttpClient mediaProbeClient=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2))
+            .followRedirects(HttpClient.Redirect.NORMAL).build();
+    /** A bounded opening check, never proof of complete audio or account rights. */
+    public boolean canOpenAudio(OnlineSongVO song) {
+        try {
+            String query=URI.create(song.getAudioUrl()).getRawQuery();
+            if(query==null)return false;
+            var request=java.net.http.HttpRequest.newBuilder(URI.create(providerUrl+"/stream?"+query))
+                    .timeout(Duration.ofSeconds(4)).header("Range","bytes=0-0").header("User-Agent","FreeMusicPlayer/1.0").GET().build();
+            var response=mediaProbeClient.send(request,java.net.http.HttpResponse.BodyHandlers.ofInputStream());
+            try(var body=response.body()) {
+                String type=response.headers().firstValue("Content-Type").orElse("").toLowerCase(java.util.Locale.ROOT);
+                return (response.statusCode()==200 || response.statusCode()==206)
+                        && (type.startsWith("audio/") || type.startsWith("video/mp4") || type.startsWith("application/octet-stream") || type.startsWith("application/ogg"))
+                        && response.headers().firstValueAsLong("Content-Length").orElse(1)>0;
+            }
+        } catch(InterruptedException error) {Thread.currentThread().interrupt();return false;}
+        catch(Exception error) {return false;}
+    }
     private static final Set<String> ALLOWED_SOURCES = Set.of(
             "netease", "tencent", "qq", "kugou", "kuwo", "baidu", "migu",
             "qianqian", "jamendo", "joox", "bilibili", "fivesing", "soda");
 
     private final RestClient restClient;
+    private final RestClient collectionClient;
     private final ObjectMapper objectMapper;
     private final String providerUrl;
     private final String providerPublicUrl;
@@ -40,6 +60,9 @@ public class OnlineMusicService {
         var factory = new JdkClientHttpRequestFactory(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build());
         factory.setReadTimeout(Duration.ofSeconds(18));
         this.restClient = restClientBuilder.requestFactory(factory).build();
+        var collectionFactory = new JdkClientHttpRequestFactory(HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build());
+        collectionFactory.setReadTimeout(Duration.ofSeconds(35));
+        this.collectionClient = restClientBuilder.clone().requestFactory(collectionFactory).build();
         this.objectMapper = objectMapper;
         this.providerUrl = trimTrailingSlash(providerUrl);
         this.providerPublicUrl = trimTrailingSlash(providerPublicUrl);
@@ -60,8 +83,35 @@ public class OnlineMusicService {
                 .build()
                 .encode()
                 .toUriString();
-        String body = restClient.get().uri(URI.create(uri)).retrieve().body(String.class);
+        String body = providerBody(uri,false);
+        return parseSongs(body);
+    }
 
+    public List<OnlineSongVO> bilibiliCollection(String bvid) {
+        if (bvid == null || !bvid.matches("^BV[a-zA-Z0-9]{10}$")) throw new IllegalArgumentException("无效的 B 站视频编号");
+        String uri = UriComponentsBuilder.fromUriString(providerUrl + "/bilibili/collection")
+                .queryParam("bvid", bvid).build().encode().toUriString();
+        return parseSongs(providerBody(uri,true));
+    }
+
+    public List<OnlineSongVO> playlist(String source,String id) {
+        if("bilibili".equals(source)) return bilibiliCollection(id);
+        if(!Set.of("netease","qq").contains(source) || id==null || !id.matches("[0-9]{1,20}")) throw new IllegalArgumentException("无效歌单标识");
+        String uri=UriComponentsBuilder.fromUriString(providerUrl+"/playlist").queryParam("source",source).queryParam("id",id).build().encode().toUriString();
+        return parseSongs(providerBody(uri,true));
+    }
+
+    private String providerBody(String uri,boolean longer) {
+        return (longer?collectionClient:restClient).get().uri(URI.create(uri))
+                .header("X-Request-Id",java.util.Objects.toString(org.slf4j.MDC.get("requestId"),java.util.UUID.randomUUID().toString()))
+                .retrieve().body(String.class);
+    }
+    public Object diagnostics() {
+        try { return objectMapper.readTree(providerBody(providerUrl+"/metrics",false)); }
+        catch(Exception e){return Map.of("status","DOWN");}
+    }
+
+    private List<OnlineSongVO> parseSongs(String body) {
         try {
             JsonNode songs = objectMapper.readTree(body).path("songs");
             List<OnlineSongVO> result = new ArrayList<>();
@@ -149,6 +199,18 @@ public class OnlineMusicService {
     public String buildStreamUrl(String source, String id) {
         return resourceUrl("stream", source, id);
     }
+    /** Persist stable identifiers; rebuild the API entry points when a private collection is read. */
+    public OnlineSongVO refreshResourceUrls(OnlineSongVO song) {
+        if (!ALLOWED_SOURCES.contains(song.getSource()) || song.getSourceSongId() == null)
+            throw new IllegalArgumentException("无效的平台元数据");
+        String pic = java.util.Objects.toString(song.getSourcePicId(), "");
+        String cover = pic.startsWith("https://") || pic.startsWith("http://") ? pic : "";
+        String audioId = song.getSourceUrlId() == null || song.getSourceUrlId().isBlank() ? song.getSourceSongId() : song.getSourceUrlId();
+        song.setAudioUrl(buildStreamUrl(song.getSource(), audioId, song.getSongName(), song.getArtistName(),
+                song.getAlbum(), song.getDuration(), cover, song.getSourceExtra(), song.getProviderEngine()));
+        song.setCoverUrl(pic.isBlank() ? null : buildCoverUrl(song.getSource(), pic, song.getSongName(), song.getArtistName(), cover, song.getProviderEngine()));
+        return song;
+    }
 
     public String buildStreamUrl(String source, String id, String name, String artist, String album,
                                  Long duration, String cover, String extra, String engine) {
@@ -179,7 +241,9 @@ public class OnlineMusicService {
             JsonNode payload = objectMapper.readTree(restClient.get().uri(URI.create(uri)).retrieve().body(String.class));
             return Map.of(
                     "lyric", payload.path("lyric").asText(""),
-                    "tlyric", payload.path("tlyric").asText("")
+                    "tlyric", payload.path("tlyric").asText(""),
+                    "romalrc", payload.path("romalrc").asText(""),
+                    "source", payload.path("source").asText(source)
             );
         } catch (Exception exception) {
             throw new IllegalStateException("在线歌词暂时不可用", exception);
@@ -240,6 +304,12 @@ public class OnlineMusicService {
                 .encode()
                 .toUriString();
         URI currentUri = URI.create(uri);
+        boolean retriedAdapter = false;
+        // Meting 支持的平台都允许一次适配回退，不再用 ID 形状猜测曲目来源。
+        boolean adapterEligible = Set.of("netease", "qq", "tencent", "kugou", "kuwo", "baidu").contains(source);
+        // QQ/酷狗 CDN 会校验 Referer，缺失时直链返回 403。
+        String referer = Set.of("qq", "tencent").contains(source) ? "https://y.qq.com/"
+                : "kugou".equals(source) ? "https://www.kugou.com/" : null;
         for (int redirectCount = 0; redirectCount <= 5; redirectCount++) {
             HttpURLConnection connection = (HttpURLConnection) currentUri.toURL().openConnection();
             // HttpURLConnection 不会自动跨协议跟随 http -> https，因此在这里受控处理。
@@ -247,9 +317,19 @@ public class OnlineMusicService {
             connection.setConnectTimeout(10_000);
             connection.setReadTimeout(30_000);
             connection.setRequestProperty("User-Agent", "FreeMusicPlayer/1.0");
+            if (referer != null) connection.setRequestProperty("Referer", referer);
             if (range != null && !range.isBlank()) connection.setRequestProperty("Range", range);
 
             int status = connection.getResponseCode();
+            // Resolve the exact same platform ID once with the compatibility
+            // adapter. Never change recording, and never retry a partial body.
+            if (!retriedAdapter && "stream".equals(resource) && adapterEligible && metadata != null
+                    && "go-music-api".equals(metadata.get("engine")) && Set.of(403, 404, 410).contains(status)) {
+                connection.disconnect(); retriedAdapter = true;
+                currentUri = UriComponentsBuilder.fromUriString(uri).replaceQueryParam("engine", "meting").build(true).toUri();
+                redirectCount = -1;
+                continue;
+            }
             if (status >= 300 && status < 400) {
                 String location = connection.getHeaderField("Location");
                 connection.disconnect();
@@ -260,6 +340,18 @@ public class OnlineMusicService {
                 continue;
             }
 
+            // 上游失败时不要透传 Content-Type/Content-Length，否则浏览器会收到
+            // “声明了长度却没有响应体”的截断响应，<audio> 永远拿不到元数据。
+            if (status >= 400) {
+                connection.disconnect();
+                response.reset();
+                response.setStatus(status < 500 ? status : HttpServletResponse.SC_BAD_GATEWAY);
+                response.setContentType("text/plain; charset=UTF-8");
+                response.setHeader("Cache-Control", "no-store");
+                response.getWriter().write("media unavailable");
+                return;
+            }
+
             response.setStatus(status);
             copyHeader(connection, response, "Content-Type");
             copyHeader(connection, response, "Content-Length");
@@ -267,10 +359,6 @@ public class OnlineMusicService {
             copyHeader(connection, response, "Accept-Ranges");
             response.setHeader("Cache-Control", "private, max-age=300");
 
-            if (status >= 400) {
-                connection.disconnect();
-                return;
-            }
             try (InputStream input = connection.getInputStream()) {
                 input.transferTo(response.getOutputStream());
                 response.flushBuffer();

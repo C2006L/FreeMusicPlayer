@@ -2,6 +2,7 @@ package com.vibemusic.controller.agent;
 
 import com.vibemusic.agent.OnlineAgentTools;
 import com.vibemusic.agent.MusicAgentTools;
+import com.vibemusic.agent.RecommendationPlan;
 import com.vibemusic.model.dto.AgentChatDTO;
 import com.vibemusic.service.OnlineMusicService;
 import com.vibemusic.service.AiStatusService;
@@ -57,7 +58,7 @@ public class AgentController {
                 .defaultAdvisors(MessageChatMemoryAdvisor.builder(memory).build()).build();
     }
 
-    @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE + ";charset=UTF-8")
     public SseEmitter chat(@Valid @RequestBody AgentChatDTO dto, HttpServletRequest request) {
         String owner = owner(request);
         String lease = java.util.UUID.randomUUID().toString();
@@ -76,24 +77,62 @@ public class AgentController {
         emitter.onTimeout(() -> { release.run(); emitter.complete(); });
         emitter.onError(error -> release.run());
         cancellations.put(owner, () -> { release.run(); emitter.complete(); });
-        if (client == null) {
+        if (client == null && RecommendationPlan.queries(dto.getQuery()).isEmpty()
+                && !RecommendationPlan.wantsDiscovery(dto.getQuery())) {
             send(emitter, "error", "AI 未启用，请检查模型配置");
             release.run();
             emitter.complete();
             return emitter;
         }
-        OnlineAgentTools tools = new OnlineAgentTools(music, localMusic);
-        Disposable running = client.prompt().user(dto.getQuery()).tools(tools)
-                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversation))
-                .stream().content().timeout(Duration.ofSeconds(90))
+        OnlineAgentTools tools = new OnlineAgentTools(music, localMusic,
+                dto.isCompleteOnly() || OnlineAgentTools.requestsCompleteOnly(dto.getQuery()));
+        var emittedText = new java.util.concurrent.atomic.AtomicBoolean();
+        Disposable running = reactor.core.publisher.Flux.defer(() -> {
+                    var queries=RecommendationPlan.queries(dto.getQuery());
+                    if(queries.isEmpty() && RecommendationPlan.wantsDiscovery(dto.getQuery())) {
+                        send(emitter,"status","正在检索平台热门歌曲");
+                        String context=tools.preparedDiscoveryContext();
+                        if(!lease.equals(activeOwners.get(owner)))return reactor.core.publisher.Flux.empty();
+                        if(tools.songs().isEmpty()) return reactor.core.publisher.Flux.just(tools.searchFailed()
+                                ? "本次热门检索未能完成，请稍后重试。"
+                                : "本次热门榜单没有返回真实候选，请稍后重试或直接搜索具体歌名。");
+                        send(emitter,"songs",tools.songs());
+                        String response="热门歌曲检索结果：找到 "+tools.songs().size()+" 首真实候选，已列在下方。";
+                        memory.add(conversation,java.util.List.of(new org.springframework.ai.chat.messages.UserMessage(dto.getQuery()),
+                                new org.springframework.ai.chat.messages.AssistantMessage(response+"\n候选："+context)));
+                        return reactor.core.publisher.Flux.just(response);
+                    }
+                    if(!queries.isEmpty()) {
+                        send(emitter,"status","正在检索真实歌曲候选");
+                        String context=tools.preparedContext(queries);
+                        if(!lease.equals(activeOwners.get(owner)))return reactor.core.publisher.Flux.empty();
+                        if(tools.songs().isEmpty()) return reactor.core.publisher.Flux.just(tools.searchFailed()
+                                ? "本次歌曲检索未能完成。可以稍后重试，或在曲库中搜索具体歌名和歌手。"
+                                : "本次没有找到符合条件的原唱录音候选，因此没有用翻唱、混音或视频合集替代。你也可以告诉我具体歌手或歌名，再换个方向找。" );
+                        send(emitter,"songs",tools.songs());
+                        send(emitter,"status","曲库检索完成");
+                        // Catalog lookup is the complete operation here. Do not keep users
+                        // waiting for a local model to restate already available song cards.
+                        String response="曲库检索结果：找到 "+tools.songs().size()+" 首匹配的歌曲候选，已列在下方。已检查音频入口响应，完整播放情况仍以实际播放为准。";
+                        memory.add(conversation,java.util.List.of(new org.springframework.ai.chat.messages.UserMessage(dto.getQuery()),
+                                new org.springframework.ai.chat.messages.AssistantMessage(response+"\n候选："+context)));
+                        return reactor.core.publisher.Flux.just(response);
+                    }
+                    return client.prompt().user(dto.getQuery()).tools(tools)
+                            .advisors(a->a.param(ChatMemory.CONVERSATION_ID,conversation)).stream().content();
+                }).timeout(Duration.ofSeconds(90))
                 .subscribeOn(reactor.core.scheduler.Schedulers.boundedElastic())
                 .subscribe(delta -> {
+                    if(!delta.isBlank())emittedText.set(true);
                     if (!send(emitter, "text", delta)) { release.run(); emitter.complete(); }
                 }, error -> {
                     send(emitter, "error", "AI 暂时无法回复：请检查 " + provider + " 服务、模型或密钥，或稍后重试。");
                     release.run();
                     emitter.complete();
                 }, () -> {
+                    if(!emittedText.get())send(emitter,"text",tools.songs().isEmpty()
+                            ? "模型本次没有返回有效回复，请重试或改用具体歌名、歌手提问。"
+                            : "已检索到以下真实歌曲候选，你可以点击卡片试听。模型本次未生成文字说明。");
                     send(emitter, "songs", tools.songs());
                     send(emitter, "done", "");
                     release.run();

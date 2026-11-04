@@ -1,6 +1,17 @@
 import http from 'node:http'
 import Meting from '@meting/core'
 import { relevanceScore, matchesSearch } from './search-utils.mjs'
+import { discoverFromPlaylists, discoveryBatch } from './discovery.mjs'
+import { loadBilibiliCollection } from './bilibili-collection.mjs'
+import { SourceRuntime } from './source-runtime.mjs'
+import { proxyPublicCover } from './public-cover.mjs'
+import { randomUUID } from 'node:crypto'
+import { searchRows } from './upstream-search.mjs'
+import { metingMetadata } from './meting-metadata.mjs'
+import { resolveLyrics, LyricCache } from './lyrics.mjs'
+const lyricCache = new LyricCache()
+const runtime = new SourceRuntime()
+const coverRuntime = new SourceRuntime({ concurrency: 4, queueCapacity: 32 })
 
 const port = Number(process.env.PORT || 3001)
 const host = process.env.HOST || '127.0.0.1'
@@ -24,12 +35,13 @@ const sourceNames = {
   fivesing: '5sing',
   soda: '汽水音乐',
 }
-const discoveryCache = { expiresAt: 0, songs: [], failedSources: [] }
+const discoveryCache = { expiresAt: 0, songs: [], failedSources: [], offset: 0, pending: null }
 const resourceCache = new Map()
-const availabilityCache = new Map()
+const collectionCache = new Map()
+const streamTargets = new Map()
 const sourceHealth = new Map()
 setInterval(() => {
-  for (const cache of [resourceCache, availabilityCache]) {
+  for (const cache of [resourceCache, collectionCache, streamTargets]) {
     for (const [key, item] of cache) if (item.expiresAt <= Date.now()) cache.delete(key)
     while (cache.size > 1000) cache.delete(cache.keys().next().value)
   }
@@ -92,6 +104,38 @@ const sendJson = (response, status, body) => {
   response.end(JSON.stringify(body))
 }
 
+const STREAM_PROBE_TIMEOUT_MS = 8000
+const probeAccepts = (type) => type.startsWith('audio/') || type.startsWith('video/mp4')
+  || type.startsWith('application/ogg') || type.startsWith('application/octet-stream')
+// QQ/酷狗直链需要平台 Referer，否则 CDN 会返回 403。
+const sourceReferer = (source) => {
+  if (source === 'qq' || source === 'tencent') return 'https://y.qq.com/'
+  if (source === 'kugou') return 'https://www.kugou.com/'
+  return ''
+}
+// 取流前先做一次 Range 探测，避免把 404/错误页交给浏览器导致进度条永远 00:00。
+const probeMedia = async (target, referer = '') => {
+  try {
+    const upstream = await fetch(target, {
+      redirect: 'follow',
+      signal: AbortSignal.timeout(STREAM_PROBE_TIMEOUT_MS),
+      headers: {
+        Range: 'bytes=0-0',
+        'User-Agent': 'FreeMusicPlayer/1.0',
+        ...(referer ? { Referer: referer } : {}),
+      },
+    })
+    const type = (upstream.headers.get('content-type') || '').toLowerCase()
+    if (upstream.body) { try { await upstream.body.cancel() } catch {} }
+    return {
+      ok: (upstream.status === 200 || upstream.status === 206) && probeAccepts(type),
+      status: upstream.status, contentType: type,
+    }
+  } catch (error) {
+    return { ok: false, status: 0, contentType: '', error: error instanceof Error ? error.message : 'probe failed' }
+  }
+}
+
 const parseResult = (value) => {
   if (value == null) return null
   if (typeof value === 'string') return JSON.parse(value)
@@ -112,6 +156,7 @@ const selectSources = (raw) => {
 const searchSource = async (source, keyword, limit) => {
   const meting = createMeting(source)
   const payload = parseResult(await meting.search(keyword, { page: 1, limit }))
+  const metadata = metingMetadata(source, meting.raw)
   const rows = Array.isArray(payload) ? payload : []
   return rows.slice(0, limit).map((song) => ({
     id: String(song.id ?? song.url_id ?? ''),
@@ -120,7 +165,7 @@ const searchSource = async (source, keyword, limit) => {
       ? song.artist.filter(Boolean).join(', ')
       : String(song.artist ?? '').trim(),
     album: String(song.album ?? '').trim(),
-    duration: Number(song.duration ?? 0),
+    duration: Number(song.duration) || metadata.get(String(song.id ?? song.url_id ?? '').toLowerCase())?.duration || 0,
     source,
     sourceName: sourceNames[source],
     accountAuthorized: Boolean(sourceCookies[source]),
@@ -145,9 +190,10 @@ const searchGoMusicApi = async (keyword, sources, limit) => {
   }), 20000)
   if (!response.ok) throw new Error(`go-music-api search failed (${response.status})`)
   const payload = await response.json()
-  const rows = payload?.data?.songs
-  if (!Array.isArray(rows)) throw new Error('go-music-api returned invalid search data')
-
+  const rows = searchRows(payload)
+  return normalizeGoSongs(rows, limit)
+}
+const normalizeGoSongs = (rows, limit) => {
   const perSource = new Map()
   return rows.map((song) => {
     const source = String(song.source || '').toLowerCase()
@@ -187,7 +233,7 @@ const aggregateSearch = async (keyword, sources, limit, strict = true) => {
   // make the browser wait for every other source supported by go-music-api.
   if (goMusicApiUrl && goRequested.length) {
     [...new Set(goRequested)].forEach((source) => {
-      tasks.push(withTimeout(searchGoMusicApi(keyword, [source], limit), 15000))
+      tasks.push(runtime.source(`go:${source}`, () => withTimeout(searchGoMusicApi(keyword, [source], limit), 15000)))
       taskNames.push(`go:${source}`)
     })
   }
@@ -198,7 +244,7 @@ const aggregateSearch = async (keyword, sources, limit, strict = true) => {
   if (sources.includes('qq')) metingFallbackSources.add('tencent')
   metingFallbackSources.forEach((source) => {
     if (!metingSources.has(source)) return
-    tasks.push(withTimeout(searchSource(source, keyword, limit), 12000))
+    tasks.push(runtime.source(`meting:${source}`, () => withTimeout(searchSource(source, keyword, limit), 12000)))
     taskNames.push(`meting:${source}`)
   })
   const settled = await Promise.allSettled(tasks)
@@ -209,18 +255,6 @@ const aggregateSearch = async (keyword, sources, limit, strict = true) => {
     if (result.status === 'fulfilled') songs.push(...result.value)
     else failedSources.push(taskNames[index])
   })
-
-  // If the enhanced provider is unavailable, transparently fall back to all
-  // sources supported by Meting rather than returning an empty search page.
-  if (!songs.length && goMusicApiUrl) {
-    const fallback = await Promise.allSettled(
-      sources.filter((source) => metingSources.has(source)).map((source) =>
-        withTimeout(searchSource(source, keyword, limit), 12000))
-    )
-    fallback.forEach((result) => {
-      if (result.status === 'fulfilled') songs.push(...result.value)
-    })
-  }
 
   const seen = new Set()
   const deduplicated = songs.filter((song) => {
@@ -256,39 +290,14 @@ const resolveResourceCached = async (source, type, id, sizeOrBitrate) => {
   return value
 }
 
-const keepPlayableSongs = async (songs) => {
-  const checked = await Promise.all(songs.map(async (song) => {
-    try {
-      const availabilityKey = `${song.source}:${song.urlId}`
-      const cachedAvailability = availabilityCache.get(availabilityKey)
-      if (cachedAvailability && cachedAvailability.expiresAt > Date.now()) {
-        return cachedAvailability.playable ? song : null
-      }
-      const target = await withTimeout(
-        resolveResourceCached(song.source, 'url', song.urlId, 320),
-        8000,
-      )
-      if (!target) {
-        availabilityCache.set(availabilityKey, { playable: false, expiresAt: Date.now() + 60 * 1000 })
-        return null
-      }
-      const mediaResponse = await withTimeout(fetch(target, {
-        headers: { Range: 'bytes=0-0', 'User-Agent': 'FreeMusicPlayer/1.0' },
-      }), 8000)
-      const contentType = mediaResponse.headers.get('content-type') || ''
-      const playable = mediaResponse.ok && !contentType.includes('json') && !contentType.includes('text/html')
-      await mediaResponse.body?.cancel()
-      availabilityCache.set(availabilityKey, { playable, expiresAt: Date.now() + 2 * 60 * 1000 })
-      return playable ? song : null
-    } catch {
-      return null
-    }
-  }))
-  return checked.filter(Boolean)
-}
-
 const server = http.createServer(async (request, response) => {
+  const requestId = String(request.headers['x-request-id'] || '').replace(/[^a-zA-Z0-9-]/g, '').slice(0,64) || randomUUID()
+  response.setHeader('X-Request-Id',requestId)
+  const started=Date.now()
   const url = new URL(request.url, `http://${request.headers.host || `${host}:${port}`}`)
+  response.on('finish',()=>console.log(JSON.stringify({requestId,method:request.method,path:url.pathname,status:response.statusCode,elapsedMs:Date.now()-started})))
+
+  if (request.method === 'GET' && url.pathname === '/metrics') return sendJson(response,200,runtime.metrics())
 
   if (request.method === 'GET' && url.pathname === '/health') {
     return sendJson(response, 200, {
@@ -305,28 +314,23 @@ const server = http.createServer(async (request, response) => {
 
   if (request.method === 'GET' && url.pathname === '/discover') {
     const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 20, 1), 30)
-    if (Date.now() < discoveryCache.expiresAt && discoveryCache.songs.length > 0) {
-      return sendJson(response, 200, {
-        songs: discoveryCache.songs.slice(0, limit),
-        failedSources: discoveryCache.failedSources,
-        cached: true,
-      })
+    if (!goMusicApiUrl) return sendJson(response, 503, { error: 'playlist discovery requires go-music-api' })
+    const cached = Date.now() < discoveryCache.expiresAt
+    if (!cached) {
+      if (!discoveryCache.pending) discoveryCache.pending = discoverFromPlaylists(goMusicApiUrl, normalizeGoSongs)
+        .then(result => {
+          discoveryCache.songs = result.songs
+          discoveryCache.failedSources = result.failedSources
+          discoveryCache.offset = 0
+          discoveryCache.expiresAt = Date.now() + (result.songs.length ? 10 * 60 * 1000 : 30000)
+        }).finally(() => { discoveryCache.pending = null })
+      try { await discoveryCache.pending } catch { return sendJson(response, 503, { error: 'playlist discovery unavailable' }) }
     }
-
-    const result = await aggregateSearch('热门歌曲', defaultSources, Math.ceil(limit / defaultSources.length) + 3, false)
-    const candidates = result.songs.filter((song) => song.availability !== 'unavailable')
-    const metingCandidates = candidates.filter((song) => song.providerEngine === 'meting')
-    const playableMeting = await keepPlayableSongs(metingCandidates)
-    const playableMetingKeys = new Set(playableMeting.map((song) => `${song.source}:${song.id}`))
-    const playableSongs = candidates.filter((song) =>
-      song.providerEngine !== 'meting' || playableMetingKeys.has(`${song.source}:${song.id}`))
-    discoveryCache.songs = playableSongs
-    discoveryCache.failedSources = result.failedSources
-    discoveryCache.expiresAt = Date.now() + 10 * 60 * 1000
+    if (!discoveryCache.songs.length && discoveryCache.failedSources.length === 2) return sendJson(response, 503, { error: 'playlist discovery unavailable' })
+    const songs = discoveryBatch(discoveryCache.songs, discoveryCache.offset, limit)
+    discoveryCache.offset = (discoveryCache.offset + songs.length) % Math.max(discoveryCache.songs.length, 1)
     return sendJson(response, 200, {
-      songs: playableSongs.slice(0, limit),
-      failedSources: result.failedSources,
-      cached: false,
+      songs, failedSources: discoveryCache.failedSources, cached, origin: 'platform-playlists',
     })
   }
 
@@ -338,8 +342,42 @@ const server = http.createServer(async (request, response) => {
 
     const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 20, 1), 50)
     const sources = selectSources(url.searchParams.get('sources'))
-    const result = await aggregateSearch(keyword, sources, limit)
-    return sendJson(response, 200, result)
+    try {
+      const key = JSON.stringify([keyword.normalize('NFKC').toLowerCase(), [...sources].sort(), limit])
+      const result = await runtime.search(key, () => aggregateSearch(keyword, sources, limit))
+      if (!result.songs.length && result.failedSources.length) return sendJson(response,503,{ error:'音源暂时不可用', ...result })
+      return sendJson(response,200,result)
+    } catch { return sendJson(response,503,{error:'音源繁忙，请稍后重试'}) }
+  }
+
+  if (request.method === 'GET' && url.pathname === '/bilibili/collection') {
+    const bvid = url.searchParams.get('bvid') || ''
+    if (!/^BV[a-zA-Z0-9]{10}$/.test(bvid)) return sendJson(response, 400, { error: 'invalid bvid' })
+    if (!goMusicApiUrl) return sendJson(response, 503, { error: 'go-music-api is disabled' })
+    try {
+      const cached = collectionCache.get(bvid)
+      if (cached && cached.expiresAt > Date.now()) return sendJson(response, 200, cached.value)
+      const value = await loadBilibiliCollection(goMusicApiUrl, bvid, normalizeGoSongs)
+      collectionCache.set(bvid, { value, expiresAt: Date.now() + 5 * 60000 })
+      while (collectionCache.size > 32) collectionCache.delete(collectionCache.keys().next().value)
+      return sendJson(response, 200, value)
+    } catch {
+      return sendJson(response, 502, { error: '无法获取 B 站目录，可能是访问限制、视频失效或上游超时，请稍后重试' })
+    }
+  }
+
+  if (request.method === 'GET' && url.pathname === '/playlist') {
+    const source = url.searchParams.get('source'), id = url.searchParams.get('id') || ''
+    if (!['netease', 'qq'].includes(source) || !/^[0-9]{1,20}$/.test(id)) return sendJson(response, 400, { error: 'invalid playlist identifier' })
+    if (!goMusicApiUrl) return sendJson(response, 503, { error: 'playlist provider disabled' })
+    try {
+      const query = new URLSearchParams({ source, id })
+      const upstream = await fetch(`${goMusicApiUrl}/api/v1/playlist/detail?${query}`, { signal: AbortSignal.timeout(30000) })
+      if (!upstream.ok) throw new Error('playlist unavailable')
+      const payload = await upstream.json(), rows = payload?.data
+      if (!Array.isArray(rows) || !rows.length || rows.length > 1000) throw new Error('empty or oversized playlist')
+      return sendJson(response, 200, { songs: normalizeGoSongs(rows.filter(song => song.source === source), 1000) })
+    } catch { return sendJson(response, 502, { error: 'playlist unavailable or exceeds 1000 entries' }) }
   }
 
   if (request.method === 'GET' && url.pathname === '/lyric') {
@@ -350,25 +388,22 @@ const server = http.createServer(async (request, response) => {
     }
     try {
       const engine = url.searchParams.get('engine') || ''
-      if (engine === 'go-music-api' && goMusicApiUrl) {
-        const target = appendSongQuery(`${goMusicApiUrl}/api/v1/music/lyric`, {
-          id, source,
-          name: url.searchParams.get('name'), artist: url.searchParams.get('artist'),
-          album: url.searchParams.get('album'), duration: url.searchParams.get('duration'),
-          sourceExtra: url.searchParams.get('extra'),
+      const result = await lyricCache.get(JSON.stringify([...url.searchParams].sort()), async () => {
+        const metingSource = source === 'qq' ? 'tencent' : source
+        return resolveLyrics({ source, preferSeparated: engine !== 'go-music-api',
+          readMeting: metingSources.has(metingSource) ? async () => parseResult(await withTimeout(createMeting(metingSource).lyric(id), 7000)) : undefined,
+          readGo: goMusicApiUrl && goSources.has(normalizeSourceForGo(source)) ? async () => {
+            const target = appendSongQuery(`${goMusicApiUrl}/api/v1/music/lyric`, {
+              id, source, name: url.searchParams.get('name'), artist: url.searchParams.get('artist'),
+              album: url.searchParams.get('album'), duration: url.searchParams.get('duration'), sourceExtra: url.searchParams.get('extra'),
+            })
+            const upstream = await fetch(target, { signal: AbortSignal.timeout(8000) }), result = await upstream.json()
+            if (!upstream.ok || result.code != null && ![0, 200].includes(result.code)) throw new Error('lyric upstream failed')
+            return result.data
+          } : undefined,
         })
-        const upstream = await withTimeout(fetch(target), 12000)
-        const result = await upstream.json()
-        return sendJson(response, upstream.ok ? 200 : 502, {
-          lyric: String(result?.data?.lyric || ''), tlyric: '',
-        })
-      }
-      const metingSource = source === 'qq' ? 'tencent' : source
-      const payload = parseResult(await createMeting(metingSource).lyric(id)) || {}
-      return sendJson(response, 200, {
-        lyric: String(payload.lyric || ''),
-        tlyric: String(payload.tlyric || ''),
       })
+      return sendJson(response, 200, result)
     } catch (error) {
       return sendJson(response, 502, { error: error instanceof Error ? error.message : 'lyric upstream failed' })
     }
@@ -383,30 +418,52 @@ const server = http.createServer(async (request, response) => {
     try {
       const isCover = url.pathname === '/cover'
       const engine = url.searchParams.get('engine') || ''
+      const metingSource = source === 'qq' ? 'tencent' : source
       let target = ''
-      if (engine === 'go-music-api' && goMusicApiUrl) {
-        if (isCover) {
+      let reason = ''
+      if (isCover) {
+        if (engine === 'go-music-api' && goMusicApiUrl) {
           const cover = url.searchParams.get('cover') || (id.startsWith('http') ? id : '')
           if (cover) {
-            const query = new URLSearchParams({ url: cover, name: url.searchParams.get('name') || '', artist: url.searchParams.get('artist') || '' })
-            target = `${goMusicApiUrl}/api/v1/music/cover?${query}`
+            await coverRuntime.gate(() => proxyPublicCover(cover, response))
+            return
           }
         } else {
-          target = appendSongQuery(`${goMusicApiUrl}/api/v1/music/stream`, {
+          target = await resolveResourceCached(metingSource, 'pic', id, 300)
+        }
+      } else {
+        const cacheKey = `${source}:${id}:${engine}`
+        const cached = streamTargets.get(cacheKey)
+        if (cached && cached.expiresAt > Date.now()) target = cached.target
+        // go-music-api 分支先校验直链，失败再回退 Meting，不再盲跳 302。
+        if (!target && engine === 'go-music-api' && goMusicApiUrl && goSources.has(normalizeSourceForGo(source))) {
+          const goTarget = appendSongQuery(`${goMusicApiUrl}/api/v1/music/stream`, {
             id, source,
             name: url.searchParams.get('name'), artist: url.searchParams.get('artist'),
             album: url.searchParams.get('album'), duration: url.searchParams.get('duration'),
             coverOriginal: url.searchParams.get('cover'), sourceExtra: url.searchParams.get('extra'),
           })
+          const probe = await probeMedia(goTarget)
+          if (probe.ok) target = goTarget
+          else reason = `go-music-api ${probe.status || probe.error || 'unreachable'}`
         }
-      } else {
-        const metingSource = source === 'qq' ? 'tencent' : source
-        target = await resolveResourceCached(metingSource, isCover ? 'pic' : 'url', id, isCover ? 300 : 320)
+        // 回退不再依赖 ID 形状，只看平台是否被 Meting 支持。
+        if (!target && metingSources.has(metingSource)) {
+          const resolved = await resolveResourceCached(metingSource, 'url', id, 320)
+          if (resolved) {
+            const probe = await probeMedia(resolved, sourceReferer(source))
+            if (probe.ok) target = resolved
+            else reason = `${reason ? `${reason}; ` : ''}meting ${probe.status || probe.error || 'unreachable'}`
+          } else if (!reason) reason = 'meting empty url'
+        }
+        if (!target && !reason) reason = 'no compatible engine'
+        if (target) streamTargets.set(cacheKey, { target, expiresAt: Date.now() + 5 * 60 * 1000 })
       }
-      if (!target) return sendJson(response, 404, { error: 'resource unavailable' })
+      if (!target) return sendJson(response, 404, { error: 'resource unavailable', reason: reason || 'resource unavailable' })
       response.writeHead(302, { Location: target, 'Cache-Control': 'private, max-age=300' })
       return response.end()
     } catch (error) {
+      if (response.headersSent) { response.destroy(); return }
       return sendJson(response, 502, { error: error instanceof Error ? error.message : 'upstream failed' })
     }
   }
