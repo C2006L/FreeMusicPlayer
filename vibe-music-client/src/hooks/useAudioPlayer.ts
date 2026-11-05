@@ -465,6 +465,20 @@ export const AudioPlayer = () => {
       }
 
       if (!stillCurrent()) return false
+      if (reason.includes('试听') && loadedTrack === track && audioElement.value && !audioElement.value.error) {
+        // 试听是当前唯一可用的音源：明确告知后继续播放它，并在结束时不再换源。
+        if (previewFallbacks.size > 100) previewFallbacks.delete(previewFallbacks.values().next().value!)
+        previewFallbacks.add(resourceIdentity(track))
+        track.playbackStatus = 'preview'
+        playbackRequested.value = true
+        ElNotification({
+          title: '当前来源仅提供试听',
+          message: '未找到同歌手、同版本且时长匹配的完整音源，将播放试听片段（会提前结束）；不会自动替换为翻唱或现场版。',
+          type: 'warning',
+        })
+        try { await audioElement.value.play() } catch { /* 自动播放被阻止时保持暂停，用户可手动继续 */ }
+        return false
+      }
       track.playbackStatus = reason.includes('试听') ? 'preview' : 'error'
       playbackRequested.value = false
       ElNotification({
