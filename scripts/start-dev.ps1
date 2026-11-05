@@ -36,6 +36,11 @@ if (-not $env:VITE_APP_BASE_API) {
 if ($publicHost -and -not $env:VIBE_MUSIC_PROVIDER_PUBLIC_URL) {
     $env:VIBE_MUSIC_PROVIDER_PUBLIC_URL = "http://${publicHost}:$backendPort/song"
 }
+# The client and API run on different ports, so a phone loading the LAN page
+# sends a LAN Origin. Keep localhost entries and add the LAN origins.
+if ($publicHost -and -not $env:FMP_ALLOWED_ORIGINS) {
+    $env:FMP_ALLOWED_ORIGINS = "http://${publicHost}:8090,http://${publicHost}:8089,http://localhost:8090,http://127.0.0.1:8090,http://localhost:8089,http://127.0.0.1:8089"
+}
 
 function Wait-Port([int]$Port, [int]$TimeoutSeconds = 120) {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)

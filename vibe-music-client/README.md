@@ -42,9 +42,10 @@ $env:FMP_PUBLIC_HOST = '192.168.1.100'
 # 方式二：分别设置（已有值不会被脚本覆盖）
 $env:VITE_APP_BASE_API = 'http://192.168.1.100:18080'
 $env:VIBE_MUSIC_PROVIDER_PUBLIC_URL = 'http://192.168.1.100:18080/song'
+$env:FMP_ALLOWED_ORIGINS = 'http://192.168.1.100:8090,http://localhost:8090,http://127.0.0.1:8090'
 ```
 
-`VITE_APP_BASE_API` 保留 `localhost` 时，前端会把发往本机回环地址的请求与媒体地址自动改写到当前页面主机；但播放代理地址由后端生成，仍建议同时设置 `VIBE_MUSIC_PROVIDER_PUBLIC_URL`。桌面默认的 `localhost` 开发方式不受影响。
+`VITE_APP_BASE_API` 保留 `localhost` 时，前端会把发往本机回环地址的请求与媒体地址自动改写到当前页面主机；但播放代理地址由后端生成，仍建议同时设置 `VIBE_MUSIC_PROVIDER_PUBLIC_URL`。手机页面与 API 端口不同，属于跨源请求，因此还需把 `http://<局域网IP>:8090` 加进后端 `FMP_ALLOWED_ORIGINS`（方式一会自动设置）；否则浏览器会因 CORS 拦截报错。桌面默认的 `localhost` 开发方式不受影响。
 
 ## 验证
 
