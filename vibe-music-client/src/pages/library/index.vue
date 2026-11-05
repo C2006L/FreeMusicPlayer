@@ -1,11 +1,38 @@
 <script setup lang="ts">
-import { getAllSongs, searchOnlineSongs } from '@/api/system'
+import { getAllSongs, searchOnlineProgressive } from '@/api/system'
 import { ElMessage } from 'element-plus'
 import { useLibraryStore } from '@/stores/modules/library'
 import { artistNames, normalizeArtist } from '@/utils/artists'
+import { usePlaybackEvidence } from '@/stores/modules/playbackEvidence'
 
 const route = useRoute()
 const libraryStore = useLibraryStore()
+const evidence = usePlaybackEvidence()
+const playbackFilter = ref('prefer')
+const showUnavailable = ref(false)
+let localPageData: any = null
+const isKnownUnavailable = (song: any) => evidence.get(song) === 'unavailable' || song.availability === 'unavailable'
+const hiddenUnavailableCount = computed(() =>
+  playbackFilter.value === 'prefer' && !showUnavailable.value
+    ? onlineResults.value.filter(isKnownUnavailable).length
+    : 0
+)
+const filteredOnline = computed(() => {
+  const songs = onlineResults.value.filter(song => {
+    if (!showUnavailable.value && playbackFilter.value === 'prefer' && isKnownUnavailable(song)) return false
+    const state = evidence.get(song)
+    if (playbackFilter.value === 'verified') return state === 'full'
+    if (playbackFilter.value === 'no-preview') return !['preview', 'unavailable'].includes(state) && !['preview', 'unavailable'].includes(song.availability)
+    return true
+  })
+  if (playbackFilter.value !== 'prefer') return songs
+  // 先完整可播，再试听、权益待验证，未知排在后面；已确认不可播的默认折叠。
+  const rank = (song: any) => {
+    const state = evidence.get(song)
+    return state === 'full' ? 0 : state === 'duration-matched' ? 1 : state === 'preview' || song.availability === 'preview' ? 2 : song.vip || song.availability === 'restricted' ? 3 : state === 'unavailable' || song.availability === 'unavailable' ? 5 : 4
+  }
+  return [...songs].sort((a, b) => rank(a) - rank(b))
+})
 
 const props = defineProps({
     selected: {
@@ -24,6 +51,8 @@ const onlineQuery = ref('')
 const searchingOnline = ref(false)
 const loading = ref(false)
 const loadError = ref('')
+const sourceStates = ref<Record<string,string>>({})
+const sourceLabels:Record<string,string>={netease:'网易云',qq:'QQ音乐',kugou:'酷狗',kuwo:'酷我',migu:'咪咕',qianqian:'千千',jamendo:'Jamendo',bilibili:'B站'}
 let requestId = 0
 let controller: AbortController | undefined
 
@@ -35,6 +64,18 @@ const state = reactive({
     total: 0,
     pageSizes: [20, 30, 50],
 })
+const updateTable = () => {
+  onlineTotal.value = filteredOnline.value.length
+  state.total = localTotal.value + onlineTotal.value
+  const offset = (currentPage.value - 1) * pageSize.value
+  const source = String(route.query.source || '')
+  const localItems = source && source !== 'local' ? [] : localPageData?.items || []
+  const onlineOffset = Math.max(0, offset - localTotal.value)
+  libraryStore.setTableData({ ...localPageData, items: [...localItems, ...filteredOnline.value.slice(onlineOffset, onlineOffset + Math.max(0, pageSize.value - localItems.length))] })
+}
+watch(filteredOnline, () => { if (!loading.value) updateTable() })
+watch(playbackFilter, () => { currentPage.value = 1; getSongs() })
+watch(showUnavailable, () => { currentPage.value = 1; if (!loading.value) updateTable() })
 
 // 监听分页变化
 const handleSizeChange = () => {
@@ -51,6 +92,8 @@ const getSongs = async () => {
     controller = new AbortController()
     loading.value = true
     loadError.value = ''
+    localPageData = null
+    localTotal.value = 0
     libraryStore.setTableData(null)
     const keyword = (route.query.query as string || '').trim()
     const artist = String(route.query.artist || '')
@@ -62,9 +105,16 @@ const getSongs = async () => {
         songName: artist ? '' : keyword,
         artistName: artist,
         album: '',
+    }).then(result=>{
+      if(id===requestId && result.code===0){
+        localPageData=result.data;localTotal.value=source && source!=='local'?0:result.data?.total || 0
+        if(localTotal.value>0){loading.value=false;updateTable()}
+      }
+      return result
     })
 
     if (!keyword) {
+      sourceStates.value = {}
       onlineResults.value = []
       onlineQuery.value = ''
       onlineTotal.value = 0
@@ -72,7 +122,13 @@ const getSongs = async () => {
     const needsOnlineSearch = Boolean(keyword && onlineQuery.value !== queryKey)
     searchingOnline.value = needsOnlineSearch
     const onlineRequest = needsOnlineSearch
-        ? searchOnlineSongs(keyword, source && source !== 'local' ? [source] : undefined, 50, controller.signal)
+        ? searchOnlineProgressive(keyword, source && source !== 'local' ? [source] : undefined, 50, controller.signal,(songs,states)=>{
+          if(id!==requestId)return
+          sourceStates.value=states
+          onlineResults.value=artist?songs.filter(song=>artistNames(song.artistName||'').some(name=>normalizeArtist(name)===normalizeArtist(artist))):songs
+          if(songs.length || Object.values(states).some(state=>state!=='搜索中'))loading.value=false
+          updateTable()
+        })
         : Promise.resolve(null)
     try {
       const [localResult, onlineResult] = await Promise.allSettled([localRequest, onlineRequest])
@@ -86,16 +142,8 @@ const getSongs = async () => {
           onlineQuery.value = online?.code === 0 ? queryKey : ''
         }
         localTotal.value = source && source !== 'local' ? 0 : local?.data?.total || 0
-        onlineTotal.value = onlineResults.value.length
-        state.total = localTotal.value + onlineTotal.value
-        const offset = (currentPage.value - 1) * pageSize.value
-        const localItems = source && source !== 'local' ? [] : local?.data?.items || []
-        const onlineOffset = Math.max(0, offset - localTotal.value)
-        const onlineItems = onlineResults.value.slice(onlineOffset, onlineOffset + Math.max(0, pageSize.value - localItems.length))
-        libraryStore.setTableData({
-            ...local?.data,
-            items: [...localItems, ...onlineItems],
-        })
+        localPageData = local?.data
+        updateTable()
         if (needsOnlineSearch && online?.code !== 0) ElMessage.warning('在线搜索暂时失败，已显示可用的本地结果')
       } else {
         loadError.value = online?.message || local?.message || '曲库服务无法连接，请重试'
@@ -135,9 +183,25 @@ onUnmounted(() => { requestId++; controller?.abort() })
             <span v-else> · 在线补充 {{ onlineTotal }} 首</span>
           </div>
         </div>
+        <div v-if="route.query.query" class="mb-4 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+          <label for="playback-filter">在线结果</label>
+          <select id="playback-filter" v-model="playbackFilter" class="rounded border border-border bg-background px-3 py-2 text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
+            <option value="prefer">按本次播放状态排序</option>
+            <option value="all">全部结果</option>
+            <option value="no-preview">隐藏已知试听与失败</option>
+            <option value="verified">仅本次已完整播完</option>
+          </select>
+          <span>{{ playbackFilter === 'verified' ? '仅显示本次确实完整播完的在线结果，本地曲库不受影响。' : '完整性未知不等于无法播放；时长匹配表示音频时长一致。' }}</span>
+          <button v-if="playbackFilter === 'prefer' && (hiddenUnavailableCount || showUnavailable)" type="button"
+            class="rounded border border-border bg-background px-3 py-2 text-foreground transition hover:bg-muted"
+            @click="showUnavailable = !showUnavailable">
+            {{ showUnavailable ? '收起暂不可播结果' : `展开 ${hiddenUnavailableCount} 条暂不可播结果` }}
+          </button>
+        </div>
+        <div v-if="searchingOnline || Object.keys(sourceStates).length" class="mb-3 flex flex-wrap gap-3 text-[11px] text-muted-foreground" role="status"><span v-for="(status,source) in sourceStates" :key="source" :title="status==='检索失败'?'该平台本次请求失败或超时，不影响其他平台，也不表示所有歌曲不可播放。':status==='无结果'?'该平台本次未返回匹配歌曲。':''">{{ sourceLabels[source] || source }} · {{ status }}</span></div>
         <div class="min-h-0 flex-1 overflow-y-auto">
           <Table :data="tableData?.items" :loading="loading" :error="loadError"
-            :empty-text="route.query.query ? '没有找到匹配的歌曲' : '曲库还是空的'" @retry="getSongs" />
+            :empty-text="searchingOnline ? '正在等待其余音源结果…' : playbackFilter === 'verified' && route.query.query ? '还没有完整播放验证过的结果，可切换到全部结果' : route.query.query ? '没有找到匹配的歌曲' : '曲库还是空的'" @retry="getSongs" />
         </div>
         <nav class="mx-auto flex w-full justify-center mt-3">
             <el-pagination v-model:page-size="pageSize" v-model:currentPage="currentPage" v-bind="state"

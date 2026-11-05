@@ -19,14 +19,24 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class OnlineMusicService {
     private static final long PROBE_TIMEOUT_MS = 2500;
+    /** 搜索只快速探测最靠前的一小批结果，用于把首屏可播项排到前面。 */
+    private static final int SEARCH_PROBE_LIMIT = 4;
+    private static final long SEARCH_PROBE_BUDGET_MS = 2000;
+    /** 单次搜索（含上游检索与探测）的总耗时上限，慢源不再额外叠加探测等待。 */
+    private static final long SEARCH_TOTAL_BUDGET_MS = 7000;
     /** 完整音源的下限约 64kbps；低于 24kbps（约 192kbps 的 1/8）视为试听。 */
     private static final long FULL_MIN_BYTES_PER_SECOND = 8_000;
     private static final long PREVIEW_MAX_BYTES_PER_SECOND = 3_000;
@@ -35,6 +45,12 @@ public class OnlineMusicService {
     private static final long PREVIEW_MAX_SECONDS = 95;
     /** 404 可能只是一次瞬时失效，延迟后只重试一次再定级。 */
     private static final long RETRY_404_DELAY_MS = 400;
+    /** 所有搜索请求共享一个探测池，避免多源并发搜索把上游连接打满。 */
+    private static final ExecutorService PROBE_EXECUTOR = Executors.newFixedThreadPool(10, runnable -> {
+        Thread thread = new Thread(runnable, "online-audio-probe");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     private final HttpClient mediaProbeClient=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2))
             .followRedirects(HttpClient.Redirect.NORMAL).build();
@@ -134,6 +150,48 @@ public class OnlineMusicService {
         return gradeAvailability(song);
     }
 
+    /**
+     * 只探测最靠前的一小批结果：默认排序里用户最先看到的条目才值得花预算，
+     * 探测有总预算，超时未完成的条目保持 unknown，不会拖慢整次搜索。
+     * 排序按 full > preview > restricted > unknown > unavailable，同一档内保持 provider 的相关性顺序。
+     */
+    private List<OnlineSongVO> verifyAvailability(List<OnlineSongVO> songs,long budgetMs) {
+        if(songs.isEmpty() || budgetMs<=0)return songs;
+        List<OnlineSongVO> candidates=songs.stream()
+                .filter(song->"unknown".equals(song.getAvailability()))
+                .limit(SEARCH_PROBE_LIMIT)
+                .toList();
+        List<Future<String>> futures=new ArrayList<>(candidates.size());
+        for(OnlineSongVO song:candidates) futures.add(PROBE_EXECUTOR.submit(()->gradeAvailability(song)));
+        long deadline=System.nanoTime()+TimeUnit.MILLISECONDS.toNanos(budgetMs);
+        for(int index=0;index<futures.size();index++) {
+            Future<String> future=futures.get(index);
+            try {
+                long remaining=deadline-System.nanoTime();
+                if(remaining<=0)break;
+                String grade=future.get(remaining,TimeUnit.NANOSECONDS);
+                if(grade!=null) candidates.get(index).setAvailability(grade);
+            } catch(InterruptedException error) {
+                Thread.currentThread().interrupt();break;
+            } catch(Exception ignored) {
+                future.cancel(true);
+            }
+        }
+        for(Future<String> future:futures) if(!future.isDone()) future.cancel(true);
+        songs.sort(Comparator.comparingInt(song->availabilityRank(song.getAvailability())));
+        return songs;
+    }
+
+    private static int availabilityRank(String availability) {
+        return switch(java.util.Objects.toString(availability,"unknown")) {
+            case "full" -> 0;
+            case "preview" -> 1;
+            case "restricted" -> 2;
+            case "unavailable" -> 4;
+            default -> 3;
+        };
+    }
+
     private static final Set<String> ALLOWED_SOURCES = Set.of(
             "netease", "tencent", "qq", "kugou", "kuwo", "baidu", "migu",
             "qianqian", "jamendo", "joox", "bilibili", "fivesing", "soda");
@@ -175,8 +233,11 @@ public class OnlineMusicService {
                 .build()
                 .encode()
                 .toUriString();
-        // 搜索只返回 provider 的原始结果，可播等级由前端按需单条探测，避免拖慢搜索。
-        return parseSongs(providerBody(uri,false));
+        // 探测最靠前的一小批并排序；其余条目仍由前端悬停时按需探测。
+        long startedAt=System.nanoTime();
+        List<OnlineSongVO> songs=parseSongs(providerBody(uri,false));
+        long remaining=SEARCH_TOTAL_BUDGET_MS-TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-startedAt);
+        return verifyAvailability(songs,Math.min(SEARCH_PROBE_BUDGET_MS,remaining));
     }
 
     public List<OnlineSongVO> bilibiliCollection(String bvid) {

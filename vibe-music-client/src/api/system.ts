@@ -1,13 +1,13 @@
 import { http } from '@/utils/http'
 import { searchRank } from '@/utils/searchRanking'
 
-// Verified complete audio is listed first; trials and unplayable entries last.
+// Verified complete audio is listed first, then trials, restricted entries, unknown last-but-one.
 // Relevance only breaks ties inside the same availability tier.
 const availabilityOrder = (song: any) =>
   song.availability === 'full' ? 0
-    : song.availability === 'unavailable' ? 4
-    : song.availability === 'preview' ? 3
-    : song.availability === 'restricted' ? 2 : 1
+    : song.availability === 'preview' ? 1
+    : song.availability === 'restricted' ? 2
+    : song.availability === 'unavailable' ? 4 : 3
 const rankSongs = (songs: any[], keyword: string) =>
   songs.sort((a, b) => availabilityOrder(a) - availabilityOrder(b) || searchRank(b, keyword) - searchRank(a, keyword))
 
