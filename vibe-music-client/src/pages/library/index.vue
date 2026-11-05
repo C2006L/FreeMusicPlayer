@@ -4,6 +4,7 @@ import { ElMessage } from 'element-plus'
 import { useLibraryStore } from '@/stores/modules/library'
 import { artistNames, normalizeArtist } from '@/utils/artists'
 import { usePlaybackEvidence } from '@/stores/modules/playbackEvidence'
+import { rememberedGrade } from '@/utils/availabilityProbe'
 
 const route = useRoute()
 const libraryStore = useLibraryStore()
@@ -11,25 +12,37 @@ const evidence = usePlaybackEvidence()
 const playbackFilter = ref('prefer')
 const showUnavailable = ref(false)
 let localPageData: any = null
-const isKnownUnavailable = (song: any) => evidence.get(song) === 'unavailable' || song.availability === 'unavailable'
-const hiddenUnavailableCount = computed(() =>
-  playbackFilter.value === 'prefer' && !showUnavailable.value
-    ? onlineResults.value.filter(isKnownUnavailable).length
-    : 0
+// 悬停补探的结果可能只回填到歌曲对象，这里统一读取，保证筛选和表格标签看到同一等级。
+const gradeOf = (song: any) => rememberedGrade(song) ?? song.availability
+const observedState = (song: any) => evidence.get(song)
+const isKnownUnavailable = (song: any) => observedState(song) === 'unavailable' || gradeOf(song) === 'unavailable'
+const isKnownBad = (song: any) =>
+  ['preview', 'unavailable'].includes(observedState(song)) || ['preview', 'unavailable'].includes(gradeOf(song))
+const knownUnavailableCount = computed(() => onlineResults.value.filter(isKnownUnavailable).length)
+// 折叠只在仍有条目可显示时生效；如果全部结果都不可播，就保持可见，避免整页空白。
+const collapseApplies = computed(() =>
+  playbackFilter.value === 'prefer' && !showUnavailable.value &&
+  knownUnavailableCount.value > 0 && onlineResults.value.length > knownUnavailableCount.value
 )
+const hiddenUnavailableCount = computed(() => collapseApplies.value ? knownUnavailableCount.value : 0)
+const applyRemembered = (songs: any[]) => songs.map(song => {
+  const grade = rememberedGrade(song)
+  return grade && song.availability !== grade ? { ...song, availability: grade } : song
+})
 const filteredOnline = computed(() => {
   const songs = onlineResults.value.filter(song => {
-    if (!showUnavailable.value && playbackFilter.value === 'prefer' && isKnownUnavailable(song)) return false
-    const state = evidence.get(song)
-    if (playbackFilter.value === 'verified') return state === 'full'
-    if (playbackFilter.value === 'no-preview') return !['preview', 'unavailable'].includes(state) && !['preview', 'unavailable'].includes(song.availability)
+    if (collapseApplies.value && isKnownUnavailable(song)) return false
+    if (playbackFilter.value === 'verified') return observedState(song) === 'full'
+    // 语义：隐藏“已知”试听与不可播；完整性未知的条目保留，悬停补探后再决定去留。
+    if (playbackFilter.value === 'no-preview') return !isKnownBad(song)
     return true
   })
   if (playbackFilter.value !== 'prefer') return songs
   // 先完整可播，再试听、权益待验证，未知排在后面；已确认不可播的默认折叠。
   const rank = (song: any) => {
-    const state = evidence.get(song)
-    return state === 'full' ? 0 : state === 'duration-matched' ? 1 : state === 'preview' || song.availability === 'preview' ? 2 : song.vip || song.availability === 'restricted' ? 3 : state === 'unavailable' || song.availability === 'unavailable' ? 5 : 4
+    const state = observedState(song)
+    const grade = gradeOf(song)
+    return state === 'full' ? 0 : state === 'duration-matched' ? 1 : state === 'preview' || grade === 'preview' ? 2 : song.vip || grade === 'restricted' ? 3 : state === 'unavailable' || grade === 'unavailable' ? 5 : 4
   }
   return [...songs].sort((a, b) => rank(a) - rank(b))
 })
@@ -74,7 +87,7 @@ const updateTable = () => {
   libraryStore.setTableData({ ...localPageData, items: [...localItems, ...filteredOnline.value.slice(onlineOffset, onlineOffset + Math.max(0, pageSize.value - localItems.length))] })
 }
 watch(filteredOnline, () => { if (!loading.value) updateTable() })
-watch(playbackFilter, () => { currentPage.value = 1; getSongs() })
+watch(playbackFilter, () => { currentPage.value = 1; if (!loading.value) updateTable() })
 watch(showUnavailable, () => { currentPage.value = 1; if (!loading.value) updateTable() })
 
 // 监听分页变化
@@ -125,7 +138,7 @@ const getSongs = async () => {
         ? searchOnlineProgressive(keyword, source && source !== 'local' ? [source] : undefined, 50, controller.signal,(songs,states)=>{
           if(id!==requestId)return
           sourceStates.value=states
-          onlineResults.value=artist?songs.filter(song=>artistNames(song.artistName||'').some(name=>normalizeArtist(name)===normalizeArtist(artist))):songs
+          onlineResults.value=applyRemembered(artist?songs.filter(song=>artistNames(song.artistName||'').some(name=>normalizeArtist(name)===normalizeArtist(artist))):songs)
           if(songs.length || Object.values(states).some(state=>state!=='搜索中'))loading.value=false
           updateTable()
         })
@@ -137,7 +150,7 @@ const getSongs = async () => {
       const online = onlineResult.status === 'fulfilled' ? onlineResult.value : null
       if (local?.code === 0 || online?.code === 0 || !needsOnlineSearch && onlineResults.value.length) {
         if (needsOnlineSearch) {
-          onlineResults.value = online?.code === 0 && Array.isArray(online.data) ? online.data : []
+          onlineResults.value = online?.code === 0 && Array.isArray(online.data) ? applyRemembered(online.data) : []
           if (artist) onlineResults.value = onlineResults.value.filter(song => artistNames(song.artistName || '').some(name => normalizeArtist(name) === normalizeArtist(artist)))
           onlineQuery.value = online?.code === 0 ? queryKey : ''
         }
@@ -191,7 +204,8 @@ onUnmounted(() => { requestId++; controller?.abort() })
             <option value="no-preview">隐藏已知试听与失败</option>
             <option value="verified">仅本次已完整播完</option>
           </select>
-          <span>{{ playbackFilter === 'verified' ? '仅显示本次确实完整播完的在线结果，本地曲库不受影响。' : '完整性未知不等于无法播放；时长匹配表示音频时长一致。' }}</span>
+          <span v-if="playbackFilter === 'no-preview'">已隐藏判定为试听或不可播放的在线结果；完整性未知的条目仍会显示，悬停后可补探并自动移除。</span>
+          <span v-else>{{ playbackFilter === 'verified' ? '仅显示本次确实完整播完的在线结果，本地曲库不受影响。' : '完整性未知不等于无法播放；时长匹配表示音频时长一致。' }}</span>
           <button v-if="playbackFilter === 'prefer' && (hiddenUnavailableCount || showUnavailable)" type="button"
             class="rounded border border-border bg-background px-3 py-2 text-foreground transition hover:bg-muted"
             @click="showUnavailable = !showUnavailable">
@@ -201,7 +215,7 @@ onUnmounted(() => { requestId++; controller?.abort() })
         <div v-if="searchingOnline || Object.keys(sourceStates).length" class="mb-3 flex flex-wrap gap-3 text-[11px] text-muted-foreground" role="status"><span v-for="(status,source) in sourceStates" :key="source" :title="status==='检索失败'?'该平台本次请求失败或超时，不影响其他平台，也不表示所有歌曲不可播放。':status==='无结果'?'该平台本次未返回匹配歌曲。':''">{{ sourceLabels[source] || source }} · {{ status }}</span></div>
         <div class="min-h-0 flex-1 overflow-y-auto">
           <Table :data="tableData?.items" :loading="loading" :error="loadError"
-            :empty-text="searchingOnline ? '正在等待其余音源结果…' : playbackFilter === 'verified' && route.query.query ? '还没有完整播放验证过的结果，可切换到全部结果' : route.query.query ? '没有找到匹配的歌曲' : '曲库还是空的'" @retry="getSongs" />
+            :empty-text="searchingOnline ? '正在等待其余音源结果…' : playbackFilter === 'verified' && route.query.query ? '还没有完整播放验证过的结果，可切换到全部结果' : playbackFilter === 'no-preview' && route.query.query ? '在线结果均为已知试听或不可播放，可切换到全部结果查看' : route.query.query ? '没有找到匹配的歌曲' : '曲库还是空的'" @retry="getSongs" />
         </div>
         <nav class="mx-auto flex w-full justify-center mt-3">
             <el-pagination v-model:page-size="pageSize" v-model:currentPage="currentPage" v-bind="state"

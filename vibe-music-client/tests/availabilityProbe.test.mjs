@@ -7,7 +7,7 @@ const load = async path => {
   const code = ts.transpile((await readFile(new URL(path, import.meta.url), 'utf8')), { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 })
   return import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`)
 }
-const { probeAvailabilityOnDemand, availabilityKey, availabilityProbeState } = await load('../src/utils/availabilityProbe.ts')
+const { probeAvailabilityOnDemand, availabilityKey, availabilityProbeState, rememberGrade, rememberedGrade } = await load('../src/utils/availabilityProbe.ts')
 
 test('on-demand probes cap concurrency and apply each grade', async () => {
   let active = 0
@@ -58,4 +58,12 @@ test('a failed probe keeps unknown and is not retried in this session', async ()
   await new Promise(r => setTimeout(r, 50))
   assert.equal(calls, 1)
   assert.equal(availabilityKey(song), 'kugou:fail-1')
+})
+
+test('remembered grades survive a rebuilt song object across pagination', async () => {
+  const song = { source: 'kugou', sourceUrlId: 'remember-1' }
+  rememberGrade(song, 'preview')
+  assert.equal(song.availability, 'preview', 'the current row is updated for rendering')
+  assert.equal(rememberedGrade({ source: 'kugou', sourceUrlId: 'remember-1' }), 'preview', 'a freshly rebuilt row keeps the grade')
+  assert.equal(rememberedGrade({ source: 'kugou', sourceUrlId: 'remember-2' }), undefined)
 })

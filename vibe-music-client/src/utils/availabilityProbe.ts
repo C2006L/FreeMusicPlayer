@@ -4,11 +4,22 @@ const MAX_CONCURRENT = 3
 const queue: Array<() => void> = []
 const pending = new Set<string>()
 const attempted = new Set<string>()
+const remembered = new Map<string, Grade>()
 let active = 0
 
 /** 同一来源下同一个曲目只探测一次，避免悬停反复触发。 */
 export const availabilityKey = (song: any) =>
   `${song?.source || ''}:${song?.sourceUrlId || song?.sourceSongId || song?.songId || ''}`
+
+/** 已探测到的等级，跨分页/重新搜索沿用，避免筛选在数据刷新后失效。 */
+export const rememberedGrade = (song: any): Grade | undefined => remembered.get(availabilityKey(song))
+
+export const rememberGrade = (song: any, grade: Grade) => {
+  const key = availabilityKey(song)
+  if (!key) return
+  remembered.set(key, grade)
+  if (song && typeof song === 'object') song.availability = grade
+}
 
 const drain = () => {
   while (active < MAX_CONCURRENT && queue.length) queue.shift()!()

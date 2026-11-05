@@ -9,7 +9,7 @@ import { UserStore } from '@/stores/modules/user'
 import { songToTrack } from '@/utils/songTrack'
 import { usePlaybackEvidence } from '@/stores/modules/playbackEvidence'
 import { evidenceLabel } from '@/utils/playbackPolicy'
-import { availabilityKey, probeAvailabilityOnDemand } from '@/utils/availabilityProbe'
+import { availabilityKey, probeAvailabilityOnDemand, rememberGrade, rememberedGrade } from '@/utils/availabilityProbe'
 
 const props = defineProps({
   data: { type: Array as PropType<Song[]>, default: () => [] },
@@ -21,7 +21,7 @@ const emit = defineEmits<{ retry: [] }>()
 const audio = AudioStore()
 const evidence = usePlaybackEvidence()
 const probeGrades = ref<Record<string, string>>({})
-const gradeOf = (song: Song) => probeGrades.value[availabilityKey(song)] ?? song.availability
+const gradeOf = (song: Song) => probeGrades.value[availabilityKey(song)] ?? rememberedGrade(song) ?? song.availability
 const statusLabel = (song: Song) => {
   const observed = evidence.get(song)
   if (observed !== 'unknown') return evidenceLabel(observed)
@@ -45,7 +45,7 @@ const requestProbe = (song: Song) => {
       if (result.code !== 0 || !result.data) return null
       return String(result.data) as 'full' | 'preview' | 'unavailable' | 'restricted'
     },
-    (grade) => { probeGrades.value[key] = grade }
+    (grade) => { probeGrades.value[key] = grade; rememberGrade(song, grade) }
   )
 }
 const userStore = UserStore()
