@@ -91,6 +91,35 @@ public class SongController {
     }
 
     /**
+     * 按需探测单条在线资源的可播等级。只接受源与曲目元数据，由服务端重建 provider 请求，
+     * 不接受客户端传入任意 URL；拿不到证据时返回 null，前端保持 unknown。
+     */
+    @GetMapping("/probeOnline")
+    public Result<String> probeOnline(
+            @RequestParam String source,
+            @RequestParam String id,
+            @RequestParam(required = false) String name,
+            @RequestParam(required = false) String artist,
+            @RequestParam(required = false) String album,
+            @RequestParam(required = false) String duration,
+            @RequestParam(required = false) String cover,
+            @RequestParam(required = false) String extra,
+            @RequestParam(required = false) String engine) {
+        Long seconds = null;
+        if (duration != null && !duration.isBlank()) {
+            try { seconds = Long.parseLong(duration.trim()); }
+            catch (NumberFormatException ignored) { return Result.error("无效的时长"); }
+        }
+        try {
+            // 用显式构造器：Result.success(String) 重载会把等级写进 message，data 将为 null。
+            String grade = onlineMusicService.probeAvailability(source, id, name, artist, album, seconds, cover, extra, engine);
+            return new Result<>(0, "探测完成", grade);
+        } catch (Exception exception) {
+            return Result.error("暂时无法探测该资源");
+        }
+    }
+
+    /**
      * 首页在线推荐。结果中的播放地址是动态解析入口，不依赖 MinIO。
      */
     @GetMapping("/discoverOnline")

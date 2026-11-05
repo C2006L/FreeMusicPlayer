@@ -19,21 +19,14 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 
 @Service
 public class OnlineMusicService {
-    private static final int SEARCH_PROBE_LIMIT = 4;
-    private static final long SEARCH_PROBE_BUDGET_MS = 2500;
-    private static final long SEARCH_PROBE_TIMEOUT_MS = 2500;
+    private static final long PROBE_TIMEOUT_MS = 2500;
     /** 完整音源的下限约 64kbps；低于 24kbps（约 192kbps 的 1/8）视为试听。 */
     private static final long FULL_MIN_BYTES_PER_SECOND = 8_000;
     private static final long PREVIEW_MAX_BYTES_PER_SECOND = 3_000;
@@ -42,12 +35,6 @@ public class OnlineMusicService {
     private static final long PREVIEW_MAX_SECONDS = 95;
     /** 404 可能只是一次瞬时失效，延迟后只重试一次再定级。 */
     private static final long RETRY_404_DELAY_MS = 400;
-    /** 全局限制探测并发，避免一次多源搜索同时打开过多上游连接。 */
-    private static final ExecutorService PROBE_EXECUTOR = Executors.newFixedThreadPool(6, runnable -> {
-        Thread thread = new Thread(runnable, "online-audio-probe");
-        thread.setDaemon(true);
-        return thread;
-    });
 
     private final HttpClient mediaProbeClient=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2))
             .followRedirects(HttpClient.Redirect.NORMAL).build();
@@ -105,11 +92,11 @@ public class OnlineMusicService {
         try {
             String query=URI.create(song.getAudioUrl()).getRawQuery();
             if(query==null)return null;
-            var probe=probeStream(query,SEARCH_PROBE_TIMEOUT_MS);
+            var probe=probeStream(query,PROBE_TIMEOUT_MS);
             if(probe.status()==404) {
                 // 只为 404 重试一次：403/410 是确定的权限或下架结果，重试没有意义。
                 Thread.sleep(RETRY_404_DELAY_MS);
-                probe=probeStream(query,SEARCH_PROBE_TIMEOUT_MS);
+                probe=probeStream(query,PROBE_TIMEOUT_MS);
             }
             if(Set.of(403,404,410).contains(probe.status()))return "unavailable";
             if(probe.status()!=200 && probe.status()!=206)return null;
@@ -132,45 +119,21 @@ public class OnlineMusicService {
     }
 
     /**
-     * 只探测前几条最容易排到前面的结果；整次探测有总预算，超时保持 unknown。
-     * 这样每次搜索最多增加约 2.5 秒，而不是逐条探完整页。
+     * 按需探测单条资源。只接受已知源与曲目元数据，由服务端重建 provider 请求，
+     * 不接受客户端传入任意 URL。拿不到证据时返回 null，前端保持 unknown。
      */
-    private List<OnlineSongVO> verifyAvailability(List<OnlineSongVO> songs) {
-        if(songs.isEmpty())return songs;
-        List<OnlineSongVO> candidates=songs.stream()
-                .filter(song->"unknown".equals(song.getAvailability()))
-                .limit(SEARCH_PROBE_LIMIT)
-                .toList();
-        List<Future<String>> futures=new ArrayList<>(candidates.size());
-        for(OnlineSongVO song:candidates) futures.add(PROBE_EXECUTOR.submit(()->gradeAvailability(song)));
-        long deadline=System.nanoTime()+TimeUnit.MILLISECONDS.toNanos(SEARCH_PROBE_BUDGET_MS);
-        for(int index=0;index<futures.size();index++) {
-            Future<String> future=futures.get(index);
-            try {
-                long remaining=deadline-System.nanoTime();
-                if(remaining<=0)break;
-                String grade=future.get(remaining,TimeUnit.NANOSECONDS);
-                if(grade!=null) candidates.get(index).setAvailability(grade);
-            } catch(InterruptedException error) {
-                Thread.currentThread().interrupt();break;
-            } catch(Exception ignored) {
-                future.cancel(true);
-            }
-        }
-        for(Future<String> future:futures) if(!future.isDone()) future.cancel(true);
-        songs.sort(Comparator.comparingInt(song->availabilityRank(song.getAvailability())));
-        return songs;
+    public String probeAvailability(String source, String id, String name, String artist, String album,
+                                    Long duration, String cover, String extra, String engine) {
+        if(!ALLOWED_SOURCES.contains(source) || id==null || id.isBlank())return null;
+        var song=OnlineSongVO.builder()
+                .source(source)
+                .sourceUrlId(id)
+                .duration(duration)
+                .audioUrl(buildStreamUrl(source,id,name,artist,album,duration,cover,extra,engine))
+                .build();
+        return gradeAvailability(song);
     }
 
-    private static int availabilityRank(String availability) {
-        return switch(java.util.Objects.toString(availability,"unknown")) {
-            case "full" -> 0;
-            case "restricted" -> 2;
-            case "preview" -> 3;
-            case "unavailable" -> 4;
-            default -> 1;
-        };
-    }
     private static final Set<String> ALLOWED_SOURCES = Set.of(
             "netease", "tencent", "qq", "kugou", "kuwo", "baidu", "migu",
             "qianqian", "jamendo", "joox", "bilibili", "fivesing", "soda");
@@ -212,8 +175,8 @@ public class OnlineMusicService {
                 .build()
                 .encode()
                 .toUriString();
-        String body = providerBody(uri,false);
-        return verifyAvailability(parseSongs(body));
+        // 搜索只返回 provider 的原始结果，可播等级由前端按需单条探测，避免拖慢搜索。
+        return parseSongs(providerBody(uri,false));
     }
 
     public List<OnlineSongVO> bilibiliCollection(String bvid) {

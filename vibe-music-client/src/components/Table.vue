@@ -3,12 +3,13 @@ import type { PropType } from 'vue'
 import type { Song } from '@/api/interface'
 import defaultAlbum from '@/assets/default_album.jpg'
 import { formatTime } from '@/utils'
-import { cancelCollectSong, collectSong, importOnlineSong } from '@/api/system'
+import { cancelCollectSong, collectSong, importOnlineSong, probeOnlineSong } from '@/api/system'
 import { ElMessage } from 'element-plus'
 import { UserStore } from '@/stores/modules/user'
 import { songToTrack } from '@/utils/songTrack'
 import { usePlaybackEvidence } from '@/stores/modules/playbackEvidence'
 import { evidenceLabel } from '@/utils/playbackPolicy'
+import { availabilityKey, probeAvailabilityOnDemand } from '@/utils/availabilityProbe'
 
 const props = defineProps({
   data: { type: Array as PropType<Song[]>, default: () => [] },
@@ -19,14 +20,33 @@ const props = defineProps({
 const emit = defineEmits<{ retry: [] }>()
 const audio = AudioStore()
 const evidence = usePlaybackEvidence()
+const probeGrades = ref<Record<string, string>>({})
+const gradeOf = (song: Song) => probeGrades.value[availabilityKey(song)] ?? song.availability
 const statusLabel = (song: Song) => {
   const observed = evidence.get(song)
   if (observed !== 'unknown') return evidenceLabel(observed)
-  if (song.availability === 'unavailable') return '暂不可播'
-  if (song.availability === 'preview') return '试听片段'
-  if (song.vip || song.availability === 'restricted') return '权益待验证'
-  if (song.availability === 'full') return '已验证完整'
+  const availability = gradeOf(song)
+  if (availability === 'unavailable') return '暂不可播'
+  if (availability === 'preview') return '试听片段'
+  if (song.vip || availability === 'restricted') return '权益待验证'
+  if (availability === 'full') return '已验证完整'
   return song.online || song.source ? '完整性未知' : ''
+}
+// 悬停或聚焦时才探测该条，替代搜索时批量预探，避免拖慢搜索与浪费上游请求。
+const requestProbe = (song: Song) => {
+  if (!song.online && (!song.source || song.source === 'local')) return
+  const availability = gradeOf(song)
+  if (availability && availability !== 'unknown') return
+  const key = availabilityKey(song)
+  probeAvailabilityOnDemand(
+    song,
+    async () => {
+      const result = await probeOnlineSong(song)
+      if (result.code !== 0 || !result.data) return null
+      return String(result.data) as 'full' | 'preview' | 'unavailable' | 'restricted'
+    },
+    (grade) => { probeGrades.value[key] = grade }
+  )
 }
 const userStore = UserStore()
 const { play, isPlaying } = useAudioPlayer()
@@ -124,6 +144,7 @@ const isCurrent = (song: Song) => {
       <article v-for="song in data" :key="songKey(song)" class="song-row group"
         :class="{ 'is-current': isCurrent(song), 'is-selected': selectedId === songKey(song) }" tabindex="0"
         :aria-current="isCurrent(song) ? 'true' : undefined" @click="selectedId = songKey(song)"
+        @mouseenter="requestProbe(song)" @focusin="requestProbe(song)"
         @dblclick="handlePlay(song)" @keydown.enter="handlePlay(song)">
         <div class="song-primary">
           <span class="playing-rail" aria-hidden="true" />

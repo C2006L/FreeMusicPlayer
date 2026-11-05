@@ -121,6 +121,24 @@ export const searchOnlineSongs = (
   })
 }
 
+/** 按需探测单条在线资源的可播等级；失败或证据不足时保持 unknown。 */
+export const probeOnlineSong = (song: any) => {
+  return http<Result>('get', '/song/probeOnline', {
+    params: {
+      source: song.source,
+      id: song.sourceUrlId || song.sourceSongId,
+      name: song.songName,
+      artist: song.artistName,
+      album: song.album,
+      duration: song.duration,
+      cover: song.coverUrl,
+      extra: song.sourceExtra,
+      engine: song.providerEngine,
+    },
+    quiet: true,
+  })
+}
+
 /** Emit actual completed source results; one failed platform does not discard the others. */
 export const searchOnlineProgressive = async (
   keyword: string,

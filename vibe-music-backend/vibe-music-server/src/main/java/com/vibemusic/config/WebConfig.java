@@ -34,7 +34,7 @@ public class WebConfig implements WebMvcConfigurer {
                         "/artist/getAllArtists", "/artist/getArtistDetail/**",
                         "/song/getAllSongs", "/song/getRecommendedSongs", "/song/getSongDetail/**",
                         "/song/searchOnline", "/song/discoverOnline",
-                        "/song/streamOnline", "/song/coverOnline", "/song/lyricOnline")
+                        "/song/streamOnline", "/song/probeOnline", "/song/coverOnline", "/song/lyricOnline")
                 .order(1);
     }
 }
