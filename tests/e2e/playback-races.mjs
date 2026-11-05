@@ -21,7 +21,7 @@ try{
   if(path==='/song/getAllSongs')data={items:[local(11),local(12)],total:2}
   else if(path.startsWith('/song/getSongDetail/')){const id=Number(path.split('/').at(-1));await new Promise(r=>setTimeout(r,id===11?1200:30));data=local(id)}
   else if(path==='/song/searchOnline'){
-   if(url.searchParams.getAll('sources').length>1){fallbackStarted=true;await new Promise(r=>setTimeout(r,1200));data=[{...bad,songId:'online:migu:good',source:'migu',sourceSongId:'good',sourceUrlId:'good',audioUrl:'http://localhost:18080/song/streamOnline?source=migu&id=good'}]}
+   if(url.searchParams.getAll('sources').length>1){fallbackStarted=true;await new Promise(r=>setTimeout(r,1200));data=[{...bad,songId:'online:migu:good',source:'migu',sourceSongId:'good',sourceUrlId:'good',availability:'full',audioUrl:'http://localhost:18080/song/streamOnline?source=migu&id=good'}]}
    else data=url.searchParams.get('sources')==='jamendo'?[bad]:[]
   }else if(path.includes('lyric'))data={lyric:''}
   return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({code:0,data})})
