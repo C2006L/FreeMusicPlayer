@@ -8,6 +8,11 @@ import NProgress from '@/config/nprogress'
 import 'nprogress/nprogress.css'
 import { UserStore } from '@/stores/modules/user'
 import { ElMessage } from 'element-plus'
+declare module 'axios' {
+  interface AxiosRequestConfig {
+    quiet?: boolean
+  }
+}
 
 const instance: AxiosInstance = axios.create({
   baseURL: import.meta.env.VITE_APP_BASE_API || 'http://localhost:18080',
@@ -64,7 +69,8 @@ instance.interceptors.response.use(
   (error) => {
     // 关闭进度条
     NProgress.done()
-    if (axios.isCancel(error)) return Promise.reject(error)
+    if (axios.isCancel(error) || error.config?.quiet)
+      return Promise.reject(error)
 
     if (error.response) {
       switch (error.response.status) {
@@ -85,10 +91,17 @@ instance.interceptors.response.use(
           ElMessage.error('接口不存在，请检查后端地址和版本')
           break
         case 429:
-          ElMessage.error(error.response.data?.message || '请求过于频繁，请稍后再试')
+          ElMessage.error(
+            error.response.data?.message || '请求过于频繁，请稍后再试'
+          )
           break
         case 500:
-          ElMessage.error('服务器错误')
+        case 502:
+        case 503:
+        case 504:
+          ElMessage.error(
+            `${error.response.data?.message || '上游服务暂时不可用'}${error.response.headers?.['x-request-id'] ? `（请求编号：${error.response.headers['x-request-id']}）` : ''}`
+          )
           break
         default:
           ElMessage.error('网络错误')

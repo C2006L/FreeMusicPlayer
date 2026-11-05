@@ -1,17 +1,25 @@
 <script setup lang="ts">
 import { discoverOnlineSongs } from '@/api/system'
-import defaultAlbum from '@/assets/default_album.jpg'
 import { formatTime } from '@/utils'
 import { ElNotification } from 'element-plus'
+import { songToTrack } from '@/utils/songTrack'
+import { usePlaybackEvidence } from '@/stores/modules/playbackEvidence'
+import { evidenceLabel } from '@/utils/playbackPolicy'
+import { usePlayHistory } from '@/stores/modules/playHistory'
+import { rebuildOnlineTrack } from '@/utils/mediaResources'
+import MusicCover from '@/components/MusicCover.vue'
 
 const router = useRouter()
 const audio = AudioStore()
-const { loadTrack, play, isPlaying } = useAudioPlayer()
+const evidence = usePlaybackEvidence()
+const history = usePlayHistory()
+const apiBase = import.meta.env.VITE_APP_BASE_API || 'http://localhost:18080'
+const { play, isPlaying } = useAudioPlayer()
 
 const recommendedSongList = ref<any[]>([])
 const loading = ref(false)
 const onlineUnavailable = ref(false)
-const recentTracks = computed(() => audio.trackList.slice(-6).reverse())
+const recentTracks = computed(() => history.entries.slice(0, 6).map(entry => ({ ...entry, track: rebuildOnlineTrack(entry.track, apiBase) })))
 const featured = computed(() => recommendedSongList.value[0])
 
 const handleRefreshSongs = async () => {
@@ -23,6 +31,7 @@ const handleRefreshSongs = async () => {
       throw new Error(result.message || '在线推荐暂时不可用')
     }
     recommendedSongList.value = result.data.map((item: any) => ({
+      track: songToTrack(item),
       id: item.songId,
       name: item.songName,
       artists: [{ name: item.artistName }],
@@ -36,6 +45,9 @@ const handleRefreshSongs = async () => {
       sourceUrlId: item.sourceUrlId,
       sourcePicId: item.sourcePicId,
       sourceLyricId: item.sourceLyricId,
+      providerEngine: item.providerEngine,
+      availability: item.availability,
+      vip: item.vip,
       online: true,
     }))
   } catch (error: any) {
@@ -54,31 +66,22 @@ const handleRefreshSongs = async () => {
 
 onMounted(handleRefreshSongs)
 
-const convertToTrackModel = (song: any) => ({
-  id: String(song.id),
-  title: song.name,
-  artist: song.artists.map((artist: any) => artist.name).join(', '),
-  album: song.album.name,
-  cover: song.album.picUrl || defaultAlbum,
-  url: song.audioUrl,
-  duration: song.duration,
-  likeStatus: song.likeStatus || 0,
-  source: song.source,
-  sourceName: song.sourceName,
-  sourceSongId: song.sourceSongId,
-  sourceUrlId: song.sourceUrlId,
-  sourcePicId: song.sourcePicId,
-  sourceLyricId: song.sourceLyricId,
-  online: song.online,
-})
+const convertToTrackModel = (song: any) => song.track
+const songStatus = (song: any) => evidence.get(song) !== 'unknown' ? evidenceLabel(evidence.get(song))
+  : song.vip || song.availability === 'restricted' ? '权益待验证'
+  : song.availability === 'preview' ? '试听片段'
+  : song.availability === 'full' ? '已验证完整' : '完整性未知'
 
 const handlePlayClick = async (row: any) => {
   const allTracks = recommendedSongList.value.map(convertToTrackModel)
   const selectedIndex = recommendedSongList.value.findIndex((song) => song.id === row.id)
   audio.setAudioStore('trackList', allTracks)
   audio.setAudioStore('currentSongIndex', selectedIndex)
-  await loadTrack()
-  play()
+  await play()
+}
+const playHistoryTrack = async (track: typeof audio.trackList[number]) => {
+  audio.addTracks({ ...track })
+  await play()
 }
 
 const isCurrentPlaying = (songId: number | string) => {
@@ -92,26 +95,27 @@ const isCurrentPlaying = (songId: number | string) => {
     <section class="editorial-hero mb-12">
       <div class="hero-copy">
         <p class="mb-3 text-[10px] font-semibold tracking-[0.28em] text-primary">FREE MUSIC PLAYER · DISCOVER</p>
-        <h1 class="mb-4 max-w-2xl text-4xl font-semibold leading-[1.12] tracking-tight md:text-5xl">从一首真正可播放的歌开始。</h1>
-        <p class="mb-7 max-w-xl text-sm leading-7 text-muted-foreground">聚合本地曲库与可用在线来源。试听、完整播放和不可用状态都会明确标注，不用失效链接伪装曲库。</p>
+        <h1 class="mb-4 max-w-2xl text-4xl font-semibold leading-[1.12] tracking-tight md:text-5xl">让音乐回到日常。</h1>
+        <p class="mb-7 max-w-xl text-sm leading-7 text-muted-foreground">从平台真实推荐歌单中发现音乐，或继续听你实际播放过的歌曲。音源的试听、权益与可用状态以实际播放为准。</p>
         <div class="flex flex-wrap gap-3">
           <button class="primary-action" @click="router.push('/library')"><icon-tabler:search />搜索音乐</button>
-          <button v-if="featured" class="secondary-action" @click="handlePlayClick(featured)"><icon-tabler:player-play-filled />播放今日首选</button>
+          <button v-if="featured" class="secondary-action" @click="handlePlayClick(featured)"><icon-tabler:player-play-filled />播放本批首曲</button>
         </div>
       </div>
       <button v-if="featured" class="feature-art" :aria-label="`播放 ${featured.name}`" @click="handlePlayClick(featured)">
-        <img :src="featured.album.picUrl || defaultAlbum" :alt="featured.name" />
-        <span><small>今日首选</small><strong>{{ featured.name }}</strong><em>{{ featured.artists.map((artist: any) => artist.name).join(' / ') }}</em></span>
+        <MusicCover :src="featured.album.picUrl" :alt="featured.name" eager />
+        <span><small>平台歌单选曲</small><strong>{{ featured.name }}</strong><em>{{ featured.artists.map((artist: any) => artist.name).join(' / ') }}</em></span>
       </button>
     </section>
 
-    <section v-if="recentTracks.length" class="mb-12">
+    <section class="mb-12">
       <div class="section-heading"><div><p>RECENTLY PLAYED</p><h2>继续聆听</h2></div></div>
-      <div class="cover-strip">
-        <button v-for="track in recentTracks" :key="track.id" class="recent-cover" @click="router.push('/library?query=' + encodeURIComponent(track.title))">
-          <img :src="track.cover || defaultAlbum" :alt="track.title" /><strong>{{ track.title }}</strong><span>{{ track.artist }}</span>
+      <div v-if="recentTracks.length" class="cover-strip">
+        <button v-for="entry in recentTracks" :key="entry.playedAt + entry.track.id" class="recent-cover" :aria-label="`播放历史歌曲 ${entry.track.title}`" @click="playHistoryTrack(entry.track)">
+          <span class="recent-cover__art"><MusicCover :src="entry.track.cover" :alt="entry.track.title" /></span><strong :title="entry.track.title">{{ entry.track.title }}</strong><span>{{ entry.track.artist }}</span>
         </button>
       </div>
+      <p v-else class="py-6 text-sm text-muted-foreground">还没有播放记录。歌曲实际播放 3 秒后会出现在这里，仅加入队列不会计入。</p>
     </section>
 
     <section class="w-full">
@@ -119,6 +123,7 @@ const isCurrentPlaying = (songId: number | string) => {
         <div>
           <p>ONLINE DISCOVERY</p>
           <h2>在线发现</h2>
+          <span class="block mt-2 text-xs text-muted-foreground">选自平台推荐歌单，不是全网热榜，也不保证完整播放。</span>
         </div>
         <button class="group/refresh inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-primary"
           :disabled="loading" @click="handleRefreshSongs">
@@ -136,10 +141,7 @@ const isCurrentPlaying = (songId: number | string) => {
             {{ String(index + 1).padStart(2, '0') }}
           </span>
           <div class="relative h-14 w-14 flex-shrink-0 overflow-hidden rounded-lg">
-            <el-image :alt="item.name" class="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-              :src="item.album.picUrl || defaultAlbum" fit="cover">
-              <template #error><img :src="defaultAlbum" class="h-full w-full object-cover" /></template>
-            </el-image>
+            <MusicCover :src="item.album.picUrl" :alt="item.name" />
             <div class="absolute inset-0 flex items-center justify-center bg-black/0 text-white opacity-0 transition group-hover:bg-black/50 group-hover:opacity-100">
               <icon-tabler:player-play-filled class="text-lg" />
             </div>
@@ -151,6 +153,7 @@ const isCurrentPlaying = (songId: number | string) => {
               <PlayingIndicator v-if="isCurrentPlaying(item.id)" :paused="!isPlaying" class="flex-shrink-0 scale-75" />
             </h3>
             <p class="truncate text-sm text-muted-foreground">{{ item.artists.map((artist: any) => artist.name).join(' ') }}</p>
+            <p class="text-[10px] text-muted-foreground">{{ songStatus(item) }}</p>
           </div>
           <p class="mr-3 text-right text-sm tabular-nums text-muted-foreground">{{ Number(item.duration) > 0 ? formatTime(item.duration) : '--:--' }}</p>
         </div>
@@ -162,7 +165,7 @@ const isCurrentPlaying = (songId: number | string) => {
         <button class="rounded-full border border-border px-5 py-2 text-sm hover:border-primary hover:text-primary" @click="handleRefreshSongs">重新连接</button>
       </div>
 
-      <div v-else class="grid grid-cols-1 gap-x-16 gap-y-1 md:grid-cols-2">
+      <div v-else-if="loading" class="grid grid-cols-1 gap-x-16 gap-y-1 md:grid-cols-2" role="status" aria-label="正在加载平台推荐歌单">
         <div v-for="n in 10" :key="n" class="flex items-center gap-4 p-2">
           <div class="h-14 w-14 flex-shrink-0 animate-pulse rounded-lg bg-muted"></div>
           <div class="flex-1 space-y-2">
@@ -170,6 +173,9 @@ const isCurrentPlaying = (songId: number | string) => {
             <div class="h-3 w-2/5 animate-pulse rounded bg-muted"></div>
           </div>
         </div>
+      </div>
+      <div v-else class="py-10 text-center text-sm text-muted-foreground" role="status">
+        平台暂未返回可展示的歌单曲目，可以先搜索音乐或稍后重试。
       </div>
     </section>
   </div>
@@ -189,7 +195,7 @@ const isCurrentPlaying = (songId: number | string) => {
 .section-heading { display:flex; align-items:end; justify-content:space-between; border-bottom:1px solid hsl(var(--border)); padding-bottom:14px; }
 .section-heading p { margin-bottom:4px; color:var(--primary); font-size:9px; font-weight:700; letter-spacing:.24em; }.section-heading h2 { font-size:22px; font-weight:600; letter-spacing:-.02em; }
 .cover-strip { display:grid; grid-template-columns:repeat(6,minmax(120px,1fr)); gap:18px; padding-top:18px; }
-.recent-cover { min-width:0; text-align:left; }.recent-cover img { aspect-ratio:1; width:100%; object-fit:cover; border-radius:7px; }.recent-cover strong,.recent-cover span { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.recent-cover strong { margin-top:9px; font-size:13px; }.recent-cover span { margin-top:2px; color:hsl(var(--muted-foreground)); font-size:11px; }
+.recent-cover { min-width:0; text-align:left; }.recent-cover__art { display:block; aspect-ratio:1; width:100%; overflow:hidden; border-radius:7px; background:hsl(var(--muted)); }.recent-cover strong,.recent-cover>span { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.recent-cover strong { margin-top:9px; font-size:13px; }.recent-cover>span:not(.recent-cover__art) { margin-top:2px; color:hsl(var(--muted-foreground)); font-size:11px; }
 @media(max-width:900px){.editorial-hero{grid-template-columns:1fr minmax(190px,.5fr)}.cover-strip{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:640px){.editorial-hero{grid-template-columns:1fr;min-height:auto}.feature-art{display:none}.cover-strip{grid-template-columns:repeat(2,1fr)}}
 </style>

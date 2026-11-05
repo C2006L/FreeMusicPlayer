@@ -45,6 +45,9 @@ export interface trackModel {
   lyric?: string
   translatedLyric?: string
   playbackStatus?: 'switching' | 'preview' | 'error'
+  collectionId?: string
+  collectionIndex?: number
+  collectionSize?: number
 //   lyrics?: ParsedLyrics // 歌词
 }
 

@@ -1,4 +1,15 @@
 import { http } from '@/utils/http'
+import { searchRank } from '@/utils/searchRanking'
+
+// Verified complete audio is listed first; trials and unplayable entries last.
+// Relevance only breaks ties inside the same availability tier.
+const availabilityOrder = (song: any) =>
+  song.availability === 'full' ? 0
+    : song.availability === 'unavailable' ? 4
+    : song.availability === 'preview' ? 3
+    : song.availability === 'restricted' ? 2 : 1
+const rankSongs = (songs: any[], keyword: string) =>
+  songs.sort((a, b) => availabilityOrder(a) - availabilityOrder(b) || searchRank(b, keyword) - searchRank(a, keyword))
 
 export type Result = {
   code: number
@@ -95,12 +106,75 @@ export const getAllSongs = (data: object) => {
 }
 
 /** 聚合搜索在线曲库 */
-export const searchOnlineSongs = (keyword: string, sources?: string[], limit = 20, signal?: AbortSignal) => {
+export const searchOnlineSongs = (
+  keyword: string,
+  sources?: string[],
+  limit = 20,
+  signal?: AbortSignal,
+  quiet = false
+) => {
   return http<Result>('get', '/song/searchOnline', {
     params: { keyword, sources, limit },
     paramsSerializer: { indexes: null },
     signal,
+    quiet,
   })
+}
+
+/** Emit actual completed source results; one failed platform does not discard the others. */
+export const searchOnlineProgressive = async (
+  keyword: string,
+  sources: string[] | undefined,
+  limit: number,
+  signal: AbortSignal,
+  update: (songs: any[], states: Record<string, string>) => void
+) => {
+  const selected = sources || [
+    'netease',
+    'qq',
+    'kugou',
+    'kuwo',
+    'migu',
+    'qianqian',
+    'jamendo',
+    'bilibili',
+  ]
+  const states: Record<string, string> = Object.fromEntries(
+    selected.map((source) => [source, '搜索中'])
+  )
+  const rows = new Map<string, any>()
+  let successful = 0
+  update([], { ...states })
+  await Promise.allSettled(
+    selected.map(async (source) => {
+      try {
+        const result = await searchOnlineSongs(
+          keyword,
+          [source],
+          limit,
+          signal,
+          true
+        )
+        if (signal.aborted) return
+        if (result.code !== 0 || !Array.isArray(result.data))
+          throw new Error('source failed')
+        successful++
+        states[source] = result.data.length ? '已返回' : '无结果'
+        for (const song of result.data)
+          rows.set(`${song.source}:${song.sourceSongId || song.songId}`, song)
+      } catch {
+        if (signal.aborted) return
+        states[source] = '检索失败'
+      }
+      if (!signal.aborted) update(rankSongs([...rows.values()], keyword), { ...states })
+    })
+  )
+  if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
+  return {
+    code: successful ? 0 : 1,
+    message: successful ? '' : '在线来源暂时不可用',
+    data: rankSongs([...rows.values()], keyword),
+  }
 }
 
 /** 首页在线推荐 */
@@ -108,9 +182,23 @@ export const discoverOnlineSongs = (limit = 20) => {
   return http<Result>('get', '/song/discoverOnline', { params: { limit } })
 }
 
+/** 获取 B 站完整分 P / 合集目录 */
+export const getBilibiliCollection = (bvid: string, signal?: AbortSignal) =>
+  http<Result>('get', '/song/bilibiliCollection', {
+    params: { bvid },
+    signal,
+    timeout: 40000,
+  })
+
 /** 获取在线歌曲 LRC 歌词 */
-export const getOnlineLyrics = (source: string, id: string, metadata: Record<string, unknown> = {}) => {
-  return http<Result>('get', '/song/lyricOnline', { params: { source, id, ...metadata } })
+export const getOnlineLyrics = (
+  source: string,
+  id: string,
+  metadata: Record<string, unknown> = {}
+) => {
+  return http<Result>('get', '/song/lyricOnline', {
+    params: { source, id, ...metadata },
+  })
 }
 
 /** 登记在线歌曲，返回可供收藏/歌单关系使用的内部数字 ID */

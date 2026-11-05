@@ -8,6 +8,8 @@ import java.io.Serializable;
 
 @Data
 @Builder
+@lombok.NoArgsConstructor
+@lombok.AllArgsConstructor
 public class OnlineSongVO implements Serializable {
     @Serial
     private static final long serialVersionUID = 1L;

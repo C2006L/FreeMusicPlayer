@@ -3,8 +3,16 @@ import { defaultSong } from '@/mock'
 import { ElNotification } from 'element-plus'
 import { PlayMode } from './interface'
 import { searchOnlineSongs, getSongDetail } from '@/api/system'
+import { sameRecording, classifyMedia, fullyPlayed, alternativeTier } from '@/utils/playbackPolicy'
+import { usePlaybackEvidence, resourceIdentity } from '@/stores/modules/playbackEvidence'
+import { songToTrack } from '@/utils/songTrack'
+import { rebuildOnlineTrack } from '@/utils/mediaResources'
+import { usePlayHistory } from '@/stores/modules/playHistory'
+import { UserStore } from '@/stores/modules/user'
 interface AudioPlayer {
+  isBuffering: Ref<boolean>
   isPlaying: Ref<boolean>
+  playbackRequested: Ref<boolean>
   currentTrack: ComputedRef<trackModel>
   currentTime: Ref<number>
   duration: Ref<number>
@@ -29,8 +37,15 @@ interface AudioPlayer {
 
 export const AudioPlayer = () => {
   const audioStore = AudioStore()
+  const evidence = usePlaybackEvidence()
+  const history = usePlayHistory()
+  const user = UserStore()
+  const apiBase = import.meta.env.VITE_APP_BASE_API || 'http://localhost:18080'
   const audioElement = ref<HTMLAudioElement | null>(null)
   const isPlaying = ref(false)
+  const playbackRequested = ref(false)
+  let playbackRequest = 0
+  const isBuffering = ref(false)
   const volume = ref(audioStore.volume ?? 50)
   const playMode = ref<PlayMode>(audioStore.playMode || 'order')
 
@@ -43,8 +58,37 @@ export const AudioPlayer = () => {
   const seekingTime = ref(0)
   const isSeeking = ref(false)
   const fallbackAttempts = new Map<string, Set<string>>()
-  let fallbackInProgress = false
+  // Tracks already downgraded to a notified trial fallback: do not re-search
+  // forever when the short media ends.
+  const previewFallbacks = new Set<string>()
+  let fallbackLease: symbol | undefined
+  let fallbackLoadGeneration = -1
   let loadGeneration = 0
+  let handledFailureGeneration = -1
+  let loadedTrack: trackModel | undefined
+  let playedSeconds = 0
+  let historyRecorded = false
+  let lastObservedTime = 0
+  let lastObservedWall = 0
+  let reportSession = crypto.randomUUID(), reportOffset = 0, lastReported = 0
+  let stallTimer: ReturnType<typeof setTimeout> | undefined
+  const clearStall = () => { if (stallTimer) clearTimeout(stallTimer); stallTimer=undefined;isBuffering.value=false }
+  const armStall = () => {
+    clearStall(); const generation=loadGeneration
+    isBuffering.value=true
+    stallTimer=setTimeout(()=>{if(generation===loadGeneration && loadedTrack===currentTrack.value && !audioElement.value?.paused) void handlePlaybackFailure('音源加载或缓冲超过20秒')},20000)
+  }
+  const reportListening = (track = loadedTrack, force = false) => {
+    const seconds=Math.max(0,Math.floor(playedSeconds-reportOffset))
+    if(!track || !user.isLoggedIn || !user.userInfo.token || seconds<3 || seconds<=lastReported || !force && lastReported>0 && seconds-lastReported<15)return
+    const session=reportSession, previous=lastReported
+    lastReported=seconds
+    void fetch(`${apiBase}/workspace/listening`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${user.userInfo.token}`},keepalive:true,signal:AbortSignal.timeout(5000),body:JSON.stringify({sessionId:session,songId:String(track.sourceSongId||track.id).slice(0,128),title:track.title.slice(0,256),artist:(track.artist||'').slice(0,256),source:track.source||'local',playedSeconds:Math.min(seconds,86400),position:Math.min(86400,Math.floor(currentTime.value))})})
+      .then(response=>{if(!response.ok)throw new Error('telemetry rejected')})
+      .catch(()=>{if(reportSession===session && lastReported===seconds)lastReported=previous})
+  }
+  const flushListening = () => reportListening(loadedTrack,true)
+  watch(()=>user.userInfo.userId,()=>{reportSession=crypto.randomUUID();reportOffset=playedSeconds;lastReported=0})
 
   const onlineSources = [
     'netease', 'qq', 'kugou', 'kuwo', 'migu', 'qianqian',
@@ -57,11 +101,8 @@ export const AudioPlayer = () => {
   const trackKey = (track: trackModel) =>
     `${normalizeText(track.title)}::${normalizeText(track.artist)}`
 
-  const getSource = (track: trackModel) =>
-    track.source || track.id.match(/^online:([^:]+):/)?.[1] || ''
-
   const isOnlineTrack = (track: trackModel) =>
-    Boolean(track.online || track.source || track.id.startsWith('online:'))
+    Boolean(track.online || (track.source && track.source !== 'local') || String(track.id).startsWith('online:'))
 
   //   // 用于追踪当前歌词索引
   //   const currentLyricIndex = ref(0)
@@ -82,14 +123,26 @@ export const AudioPlayer = () => {
   //   }
 
   // 播放音乐
-  const play = async () => {
-    if (!audioElement.value || !currentTrack.value.url) return
+  const play = async (resetAttempts = true) => {
+    if (!audioElement.value || !currentTrack.value.id) return
+    const request = ++playbackRequest
+    playbackRequested.value = true
+    const selected = currentTrack.value
+    if (loadedTrack !== selected || selected.playbackStatus === 'error' || selected.playbackStatus === 'preview' || audioElement.value.error) {
+      if (resetAttempts) fallbackAttempts.delete(trackKey(selected))
+      await loadTrack()
+    }
+    if (request !== playbackRequest || !playbackRequested.value || selected !== currentTrack.value || loadedTrack !== selected || !selected.url) return
     const requestedTrack = currentTrack.value
+    const requestedGeneration = loadGeneration
     try {
-      await audioElement.value.play()
+      const pending = audioElement.value.play()
+      armStall()
+      await pending
     } catch (error) {
-      if (requestedTrack !== currentTrack.value || error instanceof DOMException && error.name === 'AbortError') return
+      if (request !== playbackRequest || requestedGeneration !== loadGeneration || requestedTrack !== currentTrack.value || error instanceof DOMException && error.name === 'AbortError') return
       if (error instanceof DOMException && error.name === 'NotAllowedError') {
+        clearStall(); playbackRequested.value = false
         ElNotification({
           title: '浏览器已阻止自动播放',
           message: '请再次点击播放按钮。',
@@ -123,6 +176,9 @@ export const AudioPlayer = () => {
   }
   // 暂停音乐
   const pause = () => {
+    playbackRequest++
+    playbackRequested.value = false
+    clearStall()
     if (audioElement.value) {
       audioElement.value.pause()
       isPlaying.value = false
@@ -146,8 +202,6 @@ export const AudioPlayer = () => {
         )
         break
       case 'single':
-        audioElement.value!.currentTime = 0
-        break
       case 'order':
       default:
         if (audioStore.currentSongIndex < audioStore.trackList.length - 1) {
@@ -157,7 +211,7 @@ export const AudioPlayer = () => {
         }
         break
     }
-    await loadTrack()
+    if (loadedTrack === currentTrack.value) seek(0)
     await play()
   }
 
@@ -178,8 +232,6 @@ export const AudioPlayer = () => {
         )
         break
       case 'single':
-        audioElement.value!.currentTime = 0
-        break
       case 'order':
       default:
         if (audioStore.currentSongIndex > 0) {
@@ -189,16 +241,36 @@ export const AudioPlayer = () => {
         }
         break
     }
-    await loadTrack()
+    if (loadedTrack === currentTrack.value) seek(0)
     await play()
   }
 
   // 加载当前歌曲
   const loadTrack = async () => {
+    reportListening(loadedTrack,true)
+    clearStall()
     const generation = ++loadGeneration
     const track = currentTrack.value
-    // 检查歌曲 URL
-    await checkUrl()
+    if (loadedTrack && historyRecorded) history.updatePosition(loadedTrack, currentTime.value)
+    loadedTrack = undefined
+    audioElement.value?.pause()
+    isPlaying.value = false
+    // Stop old media while resolving the next track; do not request persisted
+    // URLs before we have rebuilt them for the current backend configuration.
+    audioElement.value?.removeAttribute('src')
+    currentTime.value = 0; seekingTime.value = 0; duration.value = 0; isSeeking.value = false
+    playedSeconds = 0
+    reportSession=crypto.randomUUID();reportOffset=0;lastReported=0
+    historyRecorded = false
+    lastObservedTime = 0
+    lastObservedWall = performance.now()
+    try { await checkUrl(track, generation) } catch (error: any) {
+      if (generation !== loadGeneration || track !== currentTrack.value) return
+      track.playbackStatus = 'error'
+      playbackRequested.value = false
+      ElNotification({ title: '无法刷新播放资源', message: error?.message || '请检查后端或重新搜索这首歌', type: 'warning' })
+      return
+    }
     if (generation !== loadGeneration || track !== currentTrack.value) return
     // 歌词是否存在
     // checkLyrics()
@@ -212,31 +284,29 @@ export const AudioPlayer = () => {
         ? expectedDuration
         : 0
       audioElement.value.src = currentTrack.value.url
+      loadedTrack = track
       audioElement.value.load()
     }
   }
 
   // 检查歌曲 URL
-  const checkUrl = async () => {
-    // 查看歌曲 URL 是否存在
-    if (!currentTrack.value.url) {
-      // 如果 currentTrack 的 url 不存在，则获取 URL
-      const track = currentTrack.value
-      const id = Number(track.id)
-      if (!Number.isFinite(id)) return
-      const response = await getSongDetail(id)
-      const url = (response.data as unknown as { audioUrl?: string })?.audioUrl
-
-      if (!url) return
-      // 更新 trackList 中的对应歌曲的 url
-      const trackIndex = audioStore.trackList.findIndex(
-        (item: { id: any }) => item.id === track.id
-      )
-      if (trackIndex !== -1) {
-        audioStore.trackList[trackIndex].url = url // 更新 URL
-      }
+  const checkUrl = async (track: trackModel, generation: number) => {
+    if (isOnlineTrack(track)) {
+      const refreshed = rebuildOnlineTrack(track, apiBase, true)
+      if (!refreshed.sourceUrlId) throw new Error('旧队列缺少平台歌曲标识，请重新搜索后播放；原队列不会被清空。')
+      Object.assign(track, refreshed, { playbackStatus: undefined })
+      return
     }
-    return Promise.resolve()
+    const id = Number(track.id)
+    if (Number.isFinite(id) && id > 0) {
+      const response = await getSongDetail(id)
+      if (generation !== loadGeneration || track !== currentTrack.value) return
+      const detail = response.data as unknown as { audioUrl?: string; coverUrl?: string }
+      if (response.code !== 0 || !detail?.audioUrl) throw new Error('歌曲详情没有可用音频，请检查资源或重新搜索。')
+      track.url = detail.audioUrl
+      if (detail.coverUrl) track.cover = detail.coverUrl
+    }
+    if (!track.url) throw new Error('当前歌曲没有可用播放地址')
   }
 
   // 解析歌词数据
@@ -265,120 +335,148 @@ export const AudioPlayer = () => {
         : 0
       currentTime.value = nextTime
       if (!isSeeking.value) seekingTime.value = nextTime
+      const now = performance.now()
+      const delta = nextTime - lastObservedTime
+      if (loadedTrack === currentTrack.value && !audioElement.value.paused && delta > 0 && delta < 2) {
+        clearStall()
+        playedSeconds += Math.min(delta, Math.max(0, (now - lastObservedWall) / 1000) * 1.25)
+        if (playedSeconds >= 3 && !historyRecorded) {
+          history.record(currentTrack.value, nextTime)
+          historyRecorded = true
+        }
+        reportListening()
+      }
+      lastObservedTime = nextTime
+      lastObservedWall = now
     }
   }
 
   // 更新总时长
   const onLoadedMetadata = async () => {
-    if (!audioElement.value) return
+    if (!audioElement.value || loadedTrack !== currentTrack.value) return
     const mediaDuration = audioElement.value.duration
     if (!Number.isFinite(mediaDuration) || mediaDuration <= 0) return
 
     const expectedDuration = Number(currentTrack.value.duration) || 0
     duration.value = mediaDuration
 
-    const looksLikePreview = mediaDuration >= 25 && mediaDuration <= 32
-      && (expectedDuration === 0 || expectedDuration > mediaDuration + 15)
-    if (!looksLikePreview || !isOnlineTrack(currentTrack.value)) {
-      if (!expectedDuration) currentTrack.value.duration = mediaDuration
+    const state = classifyMedia(expectedDuration, mediaDuration)
+    evidence.set(currentTrack.value, state)
+    if (state !== 'preview' || !isOnlineTrack(currentTrack.value)) {
+      if (!expectedDuration && !isOnlineTrack(currentTrack.value)) currentTrack.value.duration = mediaDuration
       currentTrack.value.playbackStatus = undefined
       return
     }
 
-    const shouldResume = !audioElement.value.paused
+    const shouldResume = playbackRequested.value
     audioElement.value.pause()
-    await tryAlternative('检测到约 30 秒的试听音源', shouldResume)
+    if (!shouldResume) { currentTrack.value.playbackStatus = 'preview'; return }
+    if (currentTrack.value.collectionId) {
+      await handlePlaybackFailure('合集条目仅提供试听')
+      return
+    }
+    await tryAlternative('检测到试听片段', shouldResume)
   }
 
-  const matchesTrack = (candidate: any, track: trackModel) => {
-    const sameTitle = normalizeText(candidate.songName || '') === normalizeText(track.title)
-    const candidateArtist = normalizeText(candidate.artistName || '')
-    const primaryArtist = normalizeText(track.artist.split(/[,，/&、]/)[0] || '')
-    const expectedDuration = Number(track.duration) || 0
-    const candidateDuration = Number(candidate.duration) || 0
-    const durationMatches = !expectedDuration || !candidateDuration
-      || Math.abs(expectedDuration - candidateDuration) <= Math.max(8, expectedDuration * 0.05)
-    // A VIP marker is informational: the user's own Cookie may still grant
-    // access. Only confirmed unavailable resources are skipped before loading.
-    const usable = candidate.availability !== 'unavailable'
-    return usable && sameTitle && Boolean(primaryArtist)
-      && candidateArtist.includes(primaryArtist) && durationMatches
+  const matchesTrack = (candidate: any, track: trackModel, allowPreview = false) => {
+    return !['preview', 'unavailable'].includes(evidence.get(candidate)) && sameRecording({
+      title: candidate.songName, artist: candidate.artistName, album: candidate.album,
+      duration: Number(candidate.duration), availability: allowPreview ? 'unknown' : candidate.availability,
+    }, track)
   }
 
   const tryAlternative = async (reason: string, resumePlayback = true) => {
     const track = currentTrack.value
-    if (fallbackInProgress || !isOnlineTrack(track)) return false
+    if ((fallbackLease && fallbackLoadGeneration === loadGeneration) || !isOnlineTrack(track)) return false
+    // The already-notified trial fallback must not trigger another round of
+    // source switching just because the excerpt ended early.
+    if (reason.includes('试听') && previewFallbacks.has(resourceIdentity(track))) {
+      track.playbackStatus = 'preview'
+      return false
+    }
 
-    fallbackInProgress = true
+    const lease = Symbol('fallback')
+    fallbackLease = lease
+    fallbackLoadGeneration = loadGeneration
     const originalKey = trackKey(track)
     const originalIndex = audioStore.currentSongIndex
+    const generation = loadGeneration
+    const request = playbackRequest
+    const stillCurrent = () => currentTrack.value === track && audioStore.currentSongIndex === originalIndex && generation === loadGeneration
+      && (!resumePlayback || playbackRequested.value && request === playbackRequest)
     const attempts = fallbackAttempts.get(originalKey) || new Set<string>()
-    const currentSource = getSource(track)
-    if (currentSource) attempts.add(currentSource)
+    attempts.add(resourceIdentity(track))
     fallbackAttempts.set(originalKey, attempts)
+    if (fallbackAttempts.size > 100) fallbackAttempts.delete(fallbackAttempts.keys().next().value!)
     track.playbackStatus = 'switching'
 
     try {
-      const remainingSources = onlineSources.filter((source) => !attempts.has(source))
-      if (remainingSources.length) {
+      if (attempts.size < 4) {
         // 多个平台由后端并行查询，避免逐个平台等待超时。
-        const result = await searchOnlineSongs(`${track.title} ${track.artist}`, remainingSources)
+        const result = await searchOnlineSongs(`${track.title} ${track.artist}`, onlineSources)
+        if (!stillCurrent()) return false
         const candidates = Array.isArray(result.data) ? result.data : []
-        const candidate = candidates.find((item: any) =>
-          !attempts.has(item.source) && matchesTrack(item, track)
+        const available = candidates.filter((item: any) =>
+          item.audioUrl && !attempts.has(resourceIdentity(item))
         )
+        // Automatic switching only trusts proven complete audio. An entry graded
+        // as a trial is used solely when no complete candidate exists.
+        const complete = available.filter((item: any) =>
+          matchesTrack(item, track) && alternativeTier(item, evidence.get(item)) === 'full'
+        )
+        const trials = available.filter((item: any) =>
+          alternativeTier(item, evidence.get(item)) === 'preview' && matchesTrack(item, track, true)
+        )
+        const candidate = complete[0] || trials[0]
+        const trialFallback = Boolean(candidate) && complete.length === 0
         if (candidate) {
-          attempts.add(candidate.source)
+          attempts.add(resourceIdentity(candidate))
           if (audioStore.currentSongIndex !== originalIndex || trackKey(currentTrack.value) !== originalKey) {
             track.playbackStatus = undefined
             return false
           }
+          reportListening(track,true)
           Object.assign(audioStore.trackList[originalIndex], {
-            id: String(candidate.songId),
-            title: candidate.songName,
-            artist: candidate.artistName,
-            album: candidate.album,
+            ...songToTrack(candidate),
             cover: candidate.coverUrl || track.cover,
-            url: candidate.audioUrl,
-            duration: Number(candidate.duration) || 0,
-            source: candidate.source,
-            sourceName: candidate.sourceName,
-            sourceSongId: candidate.sourceSongId,
-            sourceUrlId: candidate.sourceUrlId,
-            sourcePicId: candidate.sourcePicId,
-            sourceLyricId: candidate.sourceLyricId,
-            sourceExtra: candidate.sourceExtra,
-            providerEngine: candidate.providerEngine,
-            availability: candidate.availability,
-            vip: candidate.vip,
-            online: true,
             lyric: undefined,
             translatedLyric: undefined,
-            playbackStatus: undefined,
+            playbackStatus: trialFallback ? 'preview' : undefined,
           })
-          await loadTrack()
+          if (trialFallback) {
+            if (previewFallbacks.size > 100) previewFallbacks.delete(previewFallbacks.values().next().value!)
+            previewFallbacks.add(resourceIdentity(candidate))
+          }
+          // play() owns loading and the cancellation lease. Calling it once
+          // prevents late source resolution from overriding an explicit pause.
+          loadedTrack = undefined
           ElNotification({
-            title: '已自动切换音源',
-            message: `${reason}，已改用 ${candidate.sourceName || candidate.source}`,
-            type: 'info',
+            title: trialFallback ? '仅找到试听片段' : '已自动切换音源',
+            message: trialFallback
+              ? `${reason}，未找到完整音源，已改用 ${candidate.sourceName || candidate.source} 的试听片段（播放会提前结束）。`
+              : `${reason}，已改用 ${candidate.sourceName || candidate.source}`,
+            type: trialFallback ? 'warning' : 'info',
           })
-          // 允许新音源的 metadata 事件继续判定它是否仍是 30 秒试听。
-          fallbackInProgress = false
-          if (resumePlayback) await play()
+          // 新音源仍须根据实际媒体时长验证，换源本身不是成功证明。
+          if (fallbackLease === lease) fallbackLease = undefined
+          if (resumePlayback) await play(false)
           return true
         }
-        remainingSources.forEach((source) => attempts.add(source))
       }
 
-      track.playbackStatus = reason.includes('30 秒') ? 'preview' : 'error'
+      if (!stillCurrent()) return false
+      track.playbackStatus = reason.includes('试听') ? 'preview' : 'error'
+      playbackRequested.value = false
       ElNotification({
-        title: reason.includes('30 秒') ? '该歌曲仅提供试听' : '播放失败',
-        message: '已检查其他平台，暂未找到可正常播放的同一首歌曲。',
+        title: reason.includes('试听') ? '当前来源仅提供试听' : '播放失败',
+        message: '当前返回结果中未找到同歌手、同版本且时长匹配的替代资源。可在搜索页手动查看其他版本；不会自动替换为翻唱或现场版。',
         type: 'warning',
       })
       return false
     } catch {
-      track.playbackStatus = reason.includes('30 秒') ? 'preview' : 'error'
+      if (!stillCurrent()) return false
+      track.playbackStatus = reason.includes('试听') ? 'preview' : 'error'
+      playbackRequested.value = false
       ElNotification({
         title: '切换音源失败',
         message: '在线音源服务暂时无法连接，请稍后重试。',
@@ -386,13 +484,31 @@ export const AudioPlayer = () => {
       })
       return false
     } finally {
-      fallbackInProgress = false
+      if (currentTrack.value === track && generation === loadGeneration && track.playbackStatus === 'switching') {
+        track.playbackStatus = reason.includes('试听') ? 'preview' : 'error'
+      }
+      if (fallbackLease === lease) fallbackLease = undefined
     }
   }
 
   const handlePlaybackFailure = async (reason = '当前音源无法播放') => {
+    clearStall()
+    if (handledFailureGeneration === loadGeneration) return
+    handledFailureGeneration = loadGeneration
     isPlaying.value = false
+    audioElement.value?.pause()
+    evidence.set(currentTrack.value, 'unavailable')
+    if (!playbackRequested.value) { currentTrack.value.playbackStatus = 'error'; return }
+    if (currentTrack.value.collectionId && playMode.value === 'order') {
+      currentTrack.value.playbackStatus = 'error'
+      const hasNext = audioStore.currentSongIndex < audioStore.trackList.length - 1
+      ElNotification({ title: '合集条目无法播放', message: hasNext ? '已跳过当前条目，继续顺序播放下一条。' : '最后一个条目无法播放，顺序播放已停止。', type: 'warning' })
+      if (hasNext) await nextTrack()
+      else playbackRequested.value = false
+      return
+    }
     if (!isOnlineTrack(currentTrack.value)) {
+      playbackRequested.value = false
       currentTrack.value.playbackStatus = 'error'
       ElNotification({ title: '播放失败', message: '本地音频不存在或无法读取，请检查附件存储。', type: 'warning' })
       return
@@ -400,13 +516,38 @@ export const AudioPlayer = () => {
     await tryAlternative(reason, true)
   }
 
-  const onPlay = () => { isPlaying.value = true }
-  const onPause = () => { isPlaying.value = false }
-  const onPlaybackError = () => { void handlePlaybackFailure() }
+  const onPlay = () => { if (!playbackRequested.value) audioElement.value?.pause() }
+  const onPlaying = () => {
+    if (!playbackRequested.value) { audioElement.value?.pause(); return }
+    if (loadedTrack === currentTrack.value && !audioElement.value?.paused) { isPlaying.value = true; clearStall() }
+  }
+  const onPause = () => {
+    if (!audioElement.value?.paused) return
+    clearStall()
+    reportListening(loadedTrack,true)
+    isPlaying.value = false
+    if (loadedTrack && historyRecorded) history.updatePosition(loadedTrack, currentTime.value)
+  }
+  const onPlaybackError = () => { if (loadedTrack === currentTrack.value && audioElement.value?.error) void handlePlaybackFailure() }
+  const onEnded = async () => {
+    const element = audioElement.value
+    if (loadedTrack !== currentTrack.value || !element?.ended || !playbackRequested.value) return
+    if (element && isOnlineTrack(currentTrack.value) && classifyMedia(Number(currentTrack.value.duration), element.currentTime) === 'preview') {
+      evidence.set(currentTrack.value, 'preview')
+      if (currentTrack.value.collectionId) { await handlePlaybackFailure('合集条目仅提供试听'); return }
+      await tryAlternative('音频在完整时长之前结束，疑似试听片段', true)
+      return
+    }
+    if (element && classifyMedia(Number(currentTrack.value.duration), element.duration) === 'duration-matched'
+        && fullyPlayed(element.duration, element.played)) evidence.set(currentTrack.value, 'full')
+    if (playMode.value === 'single') { seek(0); await play(); return }
+    if (playMode.value === 'order' && audioStore.currentSongIndex >= audioStore.trackList.length - 1) { pause(); return }
+    void nextTrack()
+  }
 
   // 切换播放/暂停状态
   const togglePlayPause = () => {
-    if (isPlaying.value) {
+    if (playbackRequested.value) {
       pause()
     } else {
       play()
@@ -446,34 +587,49 @@ export const AudioPlayer = () => {
 
   // 组件挂载时初始化音频元素
   onMounted(() => {
-    audioElement.value = new Audio(currentTrack.value.url)
+    window.addEventListener('pagehide',flushListening)
+    audioElement.value = new Audio()
+    audioElement.value.preload = 'metadata'
     volume.value = audioStore.volume ?? 50
     audioElement.value.volume = volume.value / 100
     // 歌词是否存在
     // checkLyrics()
     // 添加事件监听器
     audioElement.value.addEventListener('timeupdate', updateTime)
-    audioElement.value.addEventListener('ended', nextTrack)
+    audioElement.value.addEventListener('ended', onEnded)
     audioElement.value.addEventListener('loadedmetadata', onLoadedMetadata)
     audioElement.value.addEventListener('play', onPlay)
     audioElement.value.addEventListener('pause', onPause)
     audioElement.value.addEventListener('error', onPlaybackError)
+    audioElement.value.addEventListener('waiting', armStall)
+    audioElement.value.addEventListener('stalled', armStall)
+    audioElement.value.addEventListener('playing', onPlaying)
   })
 
   // 组件卸载时移除事件监听器
   onUnmounted(() => {
+    flushListening();clearStall();window.removeEventListener('pagehide',flushListening)
+    loadGeneration++
+    if (loadedTrack && historyRecorded) history.updatePosition(loadedTrack, currentTime.value)
     if (audioElement.value) {
       audioElement.value.removeEventListener('timeupdate', updateTime)
-      audioElement.value.removeEventListener('ended', nextTrack)
+      audioElement.value.removeEventListener('ended', onEnded)
       audioElement.value.removeEventListener('loadedmetadata', onLoadedMetadata)
       audioElement.value.removeEventListener('play', onPlay)
       audioElement.value.removeEventListener('pause', onPause)
       audioElement.value.removeEventListener('error', onPlaybackError)
+      audioElement.value.removeEventListener('waiting', armStall)
+      audioElement.value.removeEventListener('stalled', armStall)
+      audioElement.value.removeEventListener('playing', onPlaying)
+      audioElement.value.pause()
+      audioElement.value.removeAttribute('src')
     }
   })
 
   const audioPlayer: AudioPlayer = {
+    isBuffering,
     isPlaying,
+    playbackRequested,
     currentTrack,
     currentTime,
     duration,

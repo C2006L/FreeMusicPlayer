@@ -15,32 +15,154 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class OnlineMusicService {
+    private static final int SEARCH_PROBE_LIMIT = 4;
+    private static final long SEARCH_PROBE_BUDGET_MS = 2500;
+    private static final long SEARCH_PROBE_TIMEOUT_MS = 2500;
+    /** 完整音源的下限约 64kbps；低于 24kbps（约 192kbps 的 1/8）视为试听。 */
+    private static final long FULL_MIN_BYTES_PER_SECOND = 8_000;
+    private static final long PREVIEW_MAX_BYTES_PER_SECOND = 3_000;
+    /** 只有“按 128kbps 估算的文件时长明显短于标称时长”时才判定为试听。 */
+    private static final long ASSUMED_BYTES_PER_SECOND = 16_000;
+    private static final long PREVIEW_MAX_SECONDS = 95;
+    /** 全局限制探测并发，避免一次多源搜索同时打开过多上游连接。 */
+    private static final ExecutorService PROBE_EXECUTOR = Executors.newFixedThreadPool(6, runnable -> {
+        Thread thread = new Thread(runnable, "online-audio-probe");
+        thread.setDaemon(true);
+        return thread;
+    });
+
     private final HttpClient mediaProbeClient=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2))
             .followRedirects(HttpClient.Redirect.NORMAL).build();
+
+    private record MediaProbe(int status, String contentType, long contentLength, long totalBytes) { }
+
     /** A bounded opening check, never proof of complete audio or account rights. */
     public boolean canOpenAudio(OnlineSongVO song) {
         try {
             String query=URI.create(song.getAudioUrl()).getRawQuery();
             if(query==null)return false;
-            var request=java.net.http.HttpRequest.newBuilder(URI.create(providerUrl+"/stream?"+query))
-                    .timeout(Duration.ofSeconds(4)).header("Range","bytes=0-0").header("User-Agent","FreeMusicPlayer/1.0").GET().build();
-            var response=mediaProbeClient.send(request,java.net.http.HttpResponse.BodyHandlers.ofInputStream());
-            try(var body=response.body()) {
-                String type=response.headers().firstValue("Content-Type").orElse("").toLowerCase(java.util.Locale.ROOT);
-                return (response.statusCode()==200 || response.statusCode()==206)
-                        && (type.startsWith("audio/") || type.startsWith("video/mp4") || type.startsWith("application/octet-stream") || type.startsWith("application/ogg"))
-                        && response.headers().firstValueAsLong("Content-Length").orElse(1)>0;
-            }
+            var probe=probeStream(query,4_000);
+            return (probe.status()==200 || probe.status()==206)
+                    && acceptsAudio(probe.contentType())
+                    && probe.contentLength()>0;
         } catch(InterruptedException error) {Thread.currentThread().interrupt();return false;}
         catch(Exception error) {return false;}
+    }
+
+    /**
+     * 通过 provider 的 Range 探活取得真实可播等级。拿不到确凿证据（超时、无总长度、
+     * 时长未知）时保持 unknown，绝不把未验证的资源标成 full。
+     */
+    private MediaProbe probeStream(String query, long timeoutMs) throws IOException, InterruptedException {
+        var request=HttpRequest.newBuilder(URI.create(providerUrl+"/stream?"+query))
+                .timeout(Duration.ofMillis(timeoutMs)).header("Range","bytes=0-0")
+                .header("User-Agent","FreeMusicPlayer/1.0").GET().build();
+        var response=mediaProbeClient.send(request,HttpResponse.BodyHandlers.ofInputStream());
+        try(var body=response.body()) {
+            String type=response.headers().firstValue("Content-Type").orElse("").toLowerCase(Locale.ROOT);
+            long length=response.headers().firstValueAsLong("Content-Length").orElse(0);
+            // 206 的 Content-Length 只有 1 字节，必须用 Content-Range 里的总长度；
+            // 200 表示上游忽略了 Range，Content-Length 才是完整大小。
+            long total=contentRangeTotal(response.headers().firstValue("Content-Range").orElse(""));
+            if(total<=0 && response.statusCode()==200) total=length;
+            return new MediaProbe(response.statusCode(),type,length,total);
+        }
+    }
+
+    private static long contentRangeTotal(String header) {
+        if(header==null)return 0;
+        int slash=header.lastIndexOf('/');
+        if(slash<0 || slash==header.length()-1)return 0;
+        String total=header.substring(slash+1).trim();
+        if(total.isEmpty() || "*".equals(total))return 0;
+        try { return Math.max(0,Long.parseLong(total)); } catch(NumberFormatException ignored) { return 0; }
+    }
+
+    private static boolean acceptsAudio(String type) {
+        return type.startsWith("audio/") || type.startsWith("video/mp4")
+                || type.startsWith("application/octet-stream") || type.startsWith("application/ogg");
+    }
+
+    private String gradeAvailability(OnlineSongVO song) {
+        try {
+            String query=URI.create(song.getAudioUrl()).getRawQuery();
+            if(query==null)return null;
+            var probe=probeStream(query,SEARCH_PROBE_TIMEOUT_MS);
+            if(Set.of(403,404,410).contains(probe.status()))return "unavailable";
+            if(probe.status()!=200 && probe.status()!=206)return null;
+            if(!acceptsAudio(probe.contentType()))return "unavailable";
+            long duration=song.getDuration()==null?0:song.getDuration();
+            return classifyBytes(probe.totalBytes(),duration);
+        } catch(InterruptedException error) {Thread.currentThread().interrupt();return null;}
+        catch(Exception error) {return null;}
+    }
+
+    static String classifyBytes(long totalBytes,long durationSeconds) {
+        if(totalBytes<=0 || durationSeconds<=0)return null;
+        long bytesPerSecond=totalBytes/durationSeconds;
+        long secondsAtAssumedBitrate=totalBytes/ASSUMED_BYTES_PER_SECOND;
+        // 1/8 大小的试听，或按 128kbps 估算不足 95 秒且明显短于标称时长。
+        if(bytesPerSecond<PREVIEW_MAX_BYTES_PER_SECOND
+                || secondsAtAssumedBitrate<=PREVIEW_MAX_SECONDS && secondsAtAssumedBitrate<durationSeconds*0.8)
+            return "preview";
+        return bytesPerSecond>=FULL_MIN_BYTES_PER_SECOND?"full":null;
+    }
+
+    /**
+     * 只探测前几条最容易排到前面的结果；整次探测有总预算，超时保持 unknown。
+     * 这样每次搜索最多增加约 2.5 秒，而不是逐条探完整页。
+     */
+    private List<OnlineSongVO> verifyAvailability(List<OnlineSongVO> songs) {
+        if(songs.isEmpty())return songs;
+        List<OnlineSongVO> candidates=songs.stream()
+                .filter(song->"unknown".equals(song.getAvailability()))
+                .limit(SEARCH_PROBE_LIMIT)
+                .toList();
+        List<Future<String>> futures=new ArrayList<>(candidates.size());
+        for(OnlineSongVO song:candidates) futures.add(PROBE_EXECUTOR.submit(()->gradeAvailability(song)));
+        long deadline=System.nanoTime()+TimeUnit.MILLISECONDS.toNanos(SEARCH_PROBE_BUDGET_MS);
+        for(int index=0;index<futures.size();index++) {
+            Future<String> future=futures.get(index);
+            try {
+                long remaining=deadline-System.nanoTime();
+                if(remaining<=0)break;
+                String grade=future.get(remaining,TimeUnit.NANOSECONDS);
+                if(grade!=null) candidates.get(index).setAvailability(grade);
+            } catch(InterruptedException error) {
+                Thread.currentThread().interrupt();break;
+            } catch(Exception ignored) {
+                future.cancel(true);
+            }
+        }
+        for(Future<String> future:futures) if(!future.isDone()) future.cancel(true);
+        songs.sort(Comparator.comparingInt(song->availabilityRank(song.getAvailability())));
+        return songs;
+    }
+
+    private static int availabilityRank(String availability) {
+        return switch(java.util.Objects.toString(availability,"unknown")) {
+            case "full" -> 0;
+            case "restricted" -> 2;
+            case "preview" -> 3;
+            case "unavailable" -> 4;
+            default -> 1;
+        };
     }
     private static final Set<String> ALLOWED_SOURCES = Set.of(
             "netease", "tencent", "qq", "kugou", "kuwo", "baidu", "migu",
@@ -84,7 +206,7 @@ public class OnlineMusicService {
                 .encode()
                 .toUriString();
         String body = providerBody(uri,false);
-        return parseSongs(body);
+        return verifyAvailability(parseSongs(body));
     }
 
     public List<OnlineSongVO> bilibiliCollection(String bvid) {

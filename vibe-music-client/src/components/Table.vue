@@ -7,6 +7,8 @@ import { cancelCollectSong, collectSong, importOnlineSong } from '@/api/system'
 import { ElMessage } from 'element-plus'
 import { UserStore } from '@/stores/modules/user'
 import { songToTrack } from '@/utils/songTrack'
+import { usePlaybackEvidence } from '@/stores/modules/playbackEvidence'
+import { evidenceLabel } from '@/utils/playbackPolicy'
 
 const props = defineProps({
   data: { type: Array as PropType<Song[]>, default: () => [] },
@@ -16,8 +18,18 @@ const props = defineProps({
 })
 const emit = defineEmits<{ retry: [] }>()
 const audio = AudioStore()
+const evidence = usePlaybackEvidence()
+const statusLabel = (song: Song) => {
+  const observed = evidence.get(song)
+  if (observed !== 'unknown') return evidenceLabel(observed)
+  if (song.availability === 'unavailable') return '暂不可播'
+  if (song.availability === 'preview') return '试听片段'
+  if (song.vip || song.availability === 'restricted') return '权益待验证'
+  if (song.availability === 'full') return '已验证完整'
+  return song.online || song.source ? '完整性未知' : ''
+}
 const userStore = UserStore()
-const { loadTrack, play, isPlaying } = useAudioPlayer()
+const { play, isPlaying } = useAudioPlayer()
 const selectedId = ref<string | null>(null)
 const handleCoverError = (event: Event) => {
   const image = event.target as HTMLImageElement
@@ -35,7 +47,6 @@ const handlePlay = async (song: Song) => {
   if (index < 0) return ElMessage.warning('当前歌曲暂时没有可用播放地址')
   audio.setAudioStore('trackList', tracks)
   audio.setAudioStore('currentSongIndex', index)
-  await loadTrack()
   await play()
 }
 
@@ -43,7 +54,7 @@ const updateLikeState = (song: Song, id: number | string, status: number) => {
   song.songId = id
   song.likeStatus = status
   audio.trackList.forEach((track) => {
-    if (track.id === String(id) || track.sourceSongId === song.sourceSongId) track.likeStatus = status
+    if (track.id === String(id) || (track.sourceSongId && track.sourceSongId === song.sourceSongId && track.source === song.source)) track.likeStatus = status
   })
 }
 
@@ -89,7 +100,7 @@ const downloadSong = (song: Song) => {
 
 const isCurrent = (song: Song) => {
   const track = audio.trackList[audio.currentSongIndex]
-  return Boolean(track && (track.id === String(song.songId) || (track.sourceSongId && track.sourceSongId === song.sourceSongId)))
+  return Boolean(track && (track.id === String(song.songId) || (track.sourceSongId && track.sourceSongId === song.sourceSongId && track.source === song.source)))
 }
 </script>
 
@@ -121,7 +132,7 @@ const isCurrent = (song: Song) => {
             <span class="cover-overlay"><PlayingIndicator v-if="isCurrent(song)" :paused="!isPlaying" /><icon-tabler:player-play-filled v-else /></span>
           </button>
           <div class="min-w-0">
-            <div class="flex min-w-0 items-center gap-2"><strong class="truncate text-sm font-medium" :title="song.songName">{{ song.songName }}</strong><span v-if="song.online" class="source-badge">{{ song.sourceName || song.source }}</span><span v-if="song.availability === 'restricted' || song.vip" class="availability-badge">可能需会员</span><span v-else-if="song.availability === 'unavailable'" class="availability-badge is-unavailable">暂不可播</span></div>
+            <div class="flex min-w-0 items-center gap-2"><strong class="truncate text-sm font-medium" :title="song.songName">{{ song.songName }}</strong><span v-if="song.online || song.source" class="source-badge">{{ song.sourceName || song.source }}</span><span v-if="statusLabel(song)" class="availability-badge" :class="{'is-unknown':statusLabel(song)==='完整性未知'}" title="完整性未知不等于播放失败；没有标称时长或尚未播完时无法确认整曲。记录在本次页面内15分钟有效。">{{ statusLabel(song) }}</span></div>
             <span class="block truncate text-xs text-muted-foreground" :title="song.artistName">{{ song.artistName || '未知歌手' }}</span>
           </div>
         </div>
@@ -165,4 +176,5 @@ const isCurrent = (song: Song) => {
 .song-skeleton { display:grid; min-height:60px; grid-template-columns:44px 1fr; align-items:center; gap:12px; padding-inline:12px; border-bottom:1px solid hsl(var(--border)/.45); }
 @media(max-width:840px){.song-list__header,.song-row{grid-template-columns:minmax(220px,1fr) 54px 108px}.song-album,.song-list__header span:nth-child(2){display:none}}
 @media(max-width:560px){.song-list__header{display:none}.song-row{grid-template-columns:minmax(0,1fr) 90px;gap:8px}.song-duration{display:none}}
+.availability-badge.is-unknown { color:hsl(var(--muted-foreground));background:hsl(var(--muted)/.5); }
 </style>
