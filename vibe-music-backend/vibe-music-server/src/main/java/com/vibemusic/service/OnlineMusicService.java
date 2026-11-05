@@ -40,6 +40,8 @@ public class OnlineMusicService {
     /** 只有“按 128kbps 估算的文件时长明显短于标称时长”时才判定为试听。 */
     private static final long ASSUMED_BYTES_PER_SECOND = 16_000;
     private static final long PREVIEW_MAX_SECONDS = 95;
+    /** 404 可能只是一次瞬时失效，延迟后只重试一次再定级。 */
+    private static final long RETRY_404_DELAY_MS = 400;
     /** 全局限制探测并发，避免一次多源搜索同时打开过多上游连接。 */
     private static final ExecutorService PROBE_EXECUTOR = Executors.newFixedThreadPool(6, runnable -> {
         Thread thread = new Thread(runnable, "online-audio-probe");
@@ -99,11 +101,16 @@ public class OnlineMusicService {
                 || type.startsWith("application/octet-stream") || type.startsWith("application/ogg");
     }
 
-    private String gradeAvailability(OnlineSongVO song) {
+    String gradeAvailability(OnlineSongVO song) {
         try {
             String query=URI.create(song.getAudioUrl()).getRawQuery();
             if(query==null)return null;
             var probe=probeStream(query,SEARCH_PROBE_TIMEOUT_MS);
+            if(probe.status()==404) {
+                // 只为 404 重试一次：403/410 是确定的权限或下架结果，重试没有意义。
+                Thread.sleep(RETRY_404_DELAY_MS);
+                probe=probeStream(query,SEARCH_PROBE_TIMEOUT_MS);
+            }
             if(Set.of(403,404,410).contains(probe.status()))return "unavailable";
             if(probe.status()!=200 && probe.status()!=206)return null;
             if(!acceptsAudio(probe.contentType()))return "unavailable";
