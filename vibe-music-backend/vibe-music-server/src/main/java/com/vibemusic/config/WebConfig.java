@@ -18,7 +18,7 @@ public class WebConfig implements WebMvcConfigurer {
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(authRateLimitInterceptor)
-                .addPathPatterns("/user/login", "/admin/login", "/user/sendVerificationCode", "/user/register", "/user/resetUserPassword", "/agent/chat")
+                .addPathPatterns("/user/login", "/admin/login", "/user/sendVerificationCode", "/user/register", "/user/resetUserPassword", "/agent/chat", "/agent/lyrics/translations", "/workspace/**")
                 .order(0);
 
         // 登录接口和注册接口不拦截
@@ -33,7 +33,7 @@ public class WebConfig implements WebMvcConfigurer {
                         "/playlist/getAllPlaylists", "/playlist/getRecommendedPlaylists", "/playlist/getPlaylistDetail/**",
                         "/artist/getAllArtists", "/artist/getArtistDetail/**",
                         "/song/getAllSongs", "/song/getRecommendedSongs", "/song/getSongDetail/**",
-                        "/song/searchOnline", "/song/discoverOnline",
+                        "/song/searchOnline", "/song/discoverOnline", "/song/bilibiliCollection",
                         "/song/streamOnline", "/song/probeOnline", "/song/coverOnline", "/song/lyricOnline")
                 .order(1);
     }

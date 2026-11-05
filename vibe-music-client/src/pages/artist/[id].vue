@@ -64,7 +64,7 @@ const formatBirth = (birth: string) => {
 </script>
 
 <template>
-    <div class="container mx-auto py-10 px-5 h-full flex-1 flex flex-col">
+    <div class="container mx-auto py-10 px-5 h-full flex-1 flex flex-col max-sm:py-6">
         <!-- 歌手详情 -->
         <div class="flex flex-col lg:flex-row items-center gap-8">
             <div class="w-48 h-48 rounded-full overflow-hidden bg-gray-200">

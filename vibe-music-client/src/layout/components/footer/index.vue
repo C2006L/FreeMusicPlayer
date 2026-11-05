@@ -18,9 +18,10 @@ import Right from './components/right.vue'
 .player-shell {
   min-height: var(--app-player-height);
   grid-template-columns: minmax(190px, 26%) minmax(320px, 1fr) minmax(190px, 26%);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
   background: hsl(var(--background) / .98);
   backdrop-filter: blur(14px);
 }
 @media (max-width: 900px) { .player-shell { grid-template-columns: 180px minmax(260px, 1fr) auto; } }
-@media (max-width: 680px) { .player-shell { grid-template-columns: 1fr auto; padding-inline: 8px; } .player-shell :deep(.player-tools) { display: none; } }
+@media (max-width: 680px) { .player-shell { grid-template-columns: minmax(0, 1fr) auto; padding-inline: 8px; } .player-shell :deep(.player-tools) { display: none; } }
 </style>

@@ -3,12 +3,15 @@ import { nextTick, reactive, ref, onUnmounted, watch } from 'vue'
 import { Icon } from '@iconify/vue'
 import { ElMessage } from 'element-plus'
 import { streamAgentChat, getAgentStatus, cancelAgentChat } from '@/api/agent'
+import { createUuid } from '@/utils/uuid'
 import type { Song } from '@/api/interface'
 import { stripVibeSongsTag } from '@/utils/agent'
 import { songToTrack } from '@/utils/songTrack'
 import { useAudioPlayer } from '@/hooks/useAudioPlayer'
 import MdView from '@/components/Agent/MdView.vue'
-import default_album from '@/assets/default_album.jpg'
+import MusicCover from '@/components/MusicCover.vue'
+import { usePlaybackEvidence } from '@/stores/modules/playbackEvidence'
+import { evidenceLabel } from '@/utils/playbackPolicy'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -18,7 +21,7 @@ interface ChatMessage {
 }
 
 const audio = AudioStore()
-const { loadTrack, play } = useAudioPlayer()
+const { play } = useAudioPlayer()
 
 const open = ref(false)
 const input = ref('')
@@ -27,21 +30,29 @@ const messageListEl = ref<HTMLElement | null>(null)
 const streaming = ref(false)
 const cancelling = ref(false)
 const serviceLabel = ref('正在检查 AI 服务')
+const completeOnly = ref(false)
+const evidence = usePlaybackEvidence()
+const songStatus = (song: Song) => evidence.get(song) !== 'unknown' ? evidenceLabel(evidence.get(song))
+  : song.availability === 'preview' ? '试听片段' : song.availability === 'restricted' || song.vip ? '权益待验证' : '完整性未知'
 let generation = 0
 let abortController: AbortController | null = null
 
 // 会话 id 持久化，刷新页面后仍能延续对话记忆
 const conversationId = ref(
-  sessionStorage.getItem('fmp-agent-conversation-id') || crypto.randomUUID()
+  sessionStorage.getItem('fmp-agent-conversation-id') || createUuid()
 )
 sessionStorage.setItem('fmp-agent-conversation-id', conversationId.value)
 
-watch(open, async (value) => {
-  if (!value) return
-  try { const status = await getAgentStatus(); serviceLabel.value = status.configured ? `${status.provider} · ${status.model}` : status.message }
-  catch (error: any) { serviceLabel.value = error.message }
-})
-onUnmounted(() => abortController?.abort())
+let statusTimer: ReturnType<typeof setInterval> | undefined, checkingStatus = false
+const refreshStatus = async () => {
+  if(checkingStatus || streaming.value)return
+  checkingStatus=true
+  try { const status=await getAgentStatus();if(open.value && !streaming.value)serviceLabel.value=status.configured?`${status.provider} · ${status.model}`:status.message }
+  catch { if(open.value && !streaming.value)serviceLabel.value='模型状态检查未完成，可重试' }
+  finally { checkingStatus=false }
+}
+watch(open,(value)=>{clearInterval(statusTimer);if(value){void refreshStatus();statusTimer=setInterval(()=>void refreshStatus(),20000)}})
+onUnmounted(()=>{abortController?.abort();clearInterval(statusTimer)})
 
 const suggestions = [
   '推荐几首摇滚歌曲',
@@ -72,6 +83,7 @@ const send = async () => {
   })
   messages.value.push(assistantMsg)
   streaming.value = true
+  serviceLabel.value = '正在连接助手'
   abortController = new AbortController()
   const requestGeneration = ++generation
   await scrollToBottom()
@@ -86,7 +98,9 @@ const send = async () => {
         scrollToBottom()
       },
       abortController.signal,
-      (songs) => { if (requestGeneration === generation) assistantMsg.songs = songs }
+      (songs) => { if (requestGeneration === generation) assistantMsg.songs = songs },
+      completeOnly.value,
+      (message)=>{if(requestGeneration===generation)serviceLabel.value=message}
     )
   } catch (error: any) {
     if (error.name !== 'AbortError') {
@@ -101,6 +115,7 @@ const send = async () => {
       if (!assistantMsg.content) assistantMsg.content = '本次生成已停止。'
     }
     await scrollToBottom()
+    void refreshStatus()
   }
 }
 
@@ -112,7 +127,6 @@ const playSong = async (song: Song) => {
       return
     }
     audio.addTracks(songToTrack(song))
-    await loadTrack()
     await play()
   } catch {
     ElMessage.error('播放失败，请重试')
@@ -132,7 +146,7 @@ const newConversation = async () => {
   streaming.value = false
   abortController = null
   messages.value = []
-  conversationId.value = crypto.randomUUID()
+  conversationId.value = createUuid()
   sessionStorage.setItem('fmp-agent-conversation-id', conversationId.value)
   ElMessage.success('已开启新会话')
 }
@@ -142,7 +156,7 @@ const newConversation = async () => {
   <!-- 悬浮入口按钮 -->
   <button
     v-if="!open"
-    class="fixed bottom-24 right-6 w-14 h-14 rounded-full bg-primary text-white shadow-lg shadow-primary/30 flex items-center justify-center transition-all duration-300 ease-spring hover:scale-110 hover:rotate-6 z-[100]"
+    class="agent-launcher fixed bottom-24 right-6 w-14 h-14 rounded-full bg-primary text-white shadow-lg shadow-primary/30 flex items-center justify-center transition-all duration-300 ease-spring hover:scale-110 hover:rotate-6 z-[100]"
     aria-label="打开 FreeMusic Assistant"
     @click="open = true"
   >
@@ -158,7 +172,7 @@ const newConversation = async () => {
   >
     <div
       v-if="open"
-      class="fixed bottom-24 right-6 w-[400px] max-w-[calc(100vw-3rem)] h-[560px] max-h-[calc(100vh-9rem)] bg-card border border-border rounded-2xl shadow-xl flex flex-col overflow-hidden z-[100]"
+      class="agent-panel fixed bottom-24 right-6 w-[400px] max-w-[calc(100vw-3rem)] h-[560px] max-h-[calc(100vh-9rem)] bg-card border border-border rounded-2xl shadow-xl flex flex-col overflow-hidden z-[100]"
     >
       <!-- 头部 -->
       <div
@@ -178,7 +192,7 @@ const newConversation = async () => {
         <div class="ml-auto flex items-center gap-1">
           <el-tooltip content="新会话" placement="bottom">
             <button
-              class="p-2 rounded-lg text-muted-foreground hover:text-primary hover:bg-hoverMenuBg transition-all duration-300"
+              class="agent-icon-btn p-2 rounded-lg text-muted-foreground hover:text-primary hover:bg-hoverMenuBg transition-all duration-300"
               @click="newConversation"
               aria-label="新会话"
               :disabled="cancelling"
@@ -187,7 +201,7 @@ const newConversation = async () => {
             </button>
           </el-tooltip>
           <button
-            class="p-2 rounded-lg text-muted-foreground hover:text-primary hover:bg-hoverMenuBg transition-all duration-300"
+            class="agent-icon-btn p-2 rounded-lg text-muted-foreground hover:text-primary hover:bg-hoverMenuBg transition-all duration-300"
             aria-label="关闭"
             @click="open = false"
           >
@@ -223,7 +237,7 @@ const newConversation = async () => {
             <button
               v-for="(item, index) in suggestions"
               :key="index"
-              class="text-sm text-primary border border-primary/30 rounded-full py-1.5 px-4 hover:bg-primary hover:text-white transition-all duration-300"
+              class="agent-suggestion text-sm text-primary border border-primary/30 rounded-full py-1.5 px-4 hover:bg-primary hover:text-white transition-all duration-300"
               @click="input = item"
             >
               {{ item }}
@@ -253,7 +267,7 @@ const newConversation = async () => {
               <div
                 class="text-sm leading-relaxed bg-hoverMenuBg rounded-2xl rounded-tl-md px-4 py-2.5"
               >
-                <span v-if="!msg.content && msg.loading">正在思考...</span>
+                <span v-if="!msg.content && msg.loading">{{ msg.songs.length ? '候选已找到，正在完成检索…' : '正在检索与处理…' }}</span>
                 <MdView v-else :content="stripVibeSongsTag(msg.content)" />
               </div>
 
@@ -265,15 +279,13 @@ const newConversation = async () => {
                 <div
                   v-for="song in msg.songs"
                   :key="song.songId"
-                  class="group flex items-center gap-3 bg-background border border-border rounded-xl p-2 cursor-pointer hover:border-primary/40 hover:shadow-paper transition-all duration-300"
+                  class="group flex items-center gap-3 bg-background border border-border rounded-xl p-2 cursor-pointer hover:border-primary/40 transition-colors duration-150"
+                  data-testid="agent-song-card"
                   @click="playSong(song)"
                 >
-                  <el-image
-                    lazy
-                    :src="song.coverUrl || default_album"
-                    class="w-10 h-10 rounded-lg flex-shrink-0"
-                    :alt="song.songName"
-                  />
+                  <div class="w-10 h-10 rounded-lg shrink-0 overflow-hidden">
+                    <MusicCover :src="song.coverUrl" :alt="song.songName" />
+                  </div>
                   <div class="flex-1 min-w-0">
                     <div class="text-sm line-clamp-1 font-medium">
                       {{ song.songName }}
@@ -281,9 +293,10 @@ const newConversation = async () => {
                     <div class="text-xs text-muted-foreground line-clamp-1">
                       {{ song.artistName }} · {{ song.album }}
                     </div>
+                    <div class="text-[10px] text-muted-foreground">{{ song.sourceName }} · {{ songStatus(song) }}</div>
                   </div>
                   <button
-                    class="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center transition-all duration-300 hover:scale-110 flex-shrink-0"
+                    class="agent-play-btn w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center transition-all duration-300 hover:scale-110 flex-shrink-0"
                     aria-label="播放"
                     @click.stop="playSong(song)"
                   >
@@ -314,6 +327,9 @@ const newConversation = async () => {
 
       <!-- 输入区 -->
       <div class="px-4 py-3 border-t border-border bg-background">
+        <label class="mb-2 flex items-center gap-2 text-[11px] text-muted-foreground" title="只接受服务端已有完整验证证据的在线资源；目前可能没有结果。浏览器本次播放记录不上传到服务器。">
+          <input v-model="completeOnly" type="checkbox" :disabled="streaming || cancelling" /> 仅服务端已验证完整的在线资源
+        </label>
         <div
           class="flex items-center gap-2 bg-card border border-border rounded-xl px-3 py-1.5 focus-within:ring-2 focus-within:ring-primary/50 transition-all duration-300"
         >
@@ -327,7 +343,7 @@ const newConversation = async () => {
           />
           <button v-if="streaming" class="text-xs text-primary shrink-0" :disabled="cancelling" @click="stopGenerating" aria-label="停止生成">{{ cancelling ? '停止中' : '停止' }}</button>
           <button
-            class="w-8 h-8 rounded-lg bg-primary text-white flex items-center justify-center transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed hover:scale-105 flex-shrink-0"
+            class="agent-send w-8 h-8 rounded-lg bg-primary text-white flex items-center justify-center transition-all duration-300 disabled:opacity-40 disabled:cursor-not-allowed hover:scale-105 flex-shrink-0"
             :disabled="streaming || cancelling || !input.trim()"
             aria-label="发送"
             @click="send"
@@ -342,3 +358,41 @@ const newConversation = async () => {
     </div>
   </Transition>
 </template>
+
+<style scoped>
+@media (max-width: 767px) {
+  .agent-launcher {
+    left: 14px;
+    right: auto;
+    bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  }
+  .agent-panel {
+    inset: 0 !important;
+    width: 100vw !important;
+    max-width: 100vw !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .agent-icon-btn {
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+  }
+  .agent-play-btn,
+  .agent-send {
+    width: 44px;
+    height: 44px;
+  }
+  .agent-suggestion {
+    min-height: 44px;
+  }
+  .agent-panel input {
+    min-height: 44px;
+  }
+}
+</style>

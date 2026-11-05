@@ -17,6 +17,15 @@ import java.util.regex.Pattern;
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+    @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
+    public org.springframework.http.ResponseEntity<?> status(org.springframework.web.server.ResponseStatusException ex) {
+        return org.springframework.http.ResponseEntity.status(ex.getStatusCode()).body(java.util.Map.of(
+                "code", 1, "message", ex.getReason() == null ? "请求失败" : ex.getReason(),
+                "requestId", java.util.Objects.toString(org.slf4j.MDC.get("requestId"), "")));
+    }
+    @ExceptionHandler(IllegalArgumentException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Result invalid(IllegalArgumentException ex) { return Result.error(ex.getMessage()); }
 
     private static final Pattern DUPLICATE_ENTRY_PATTERN = Pattern.compile("Duplicate entry '(.+?)' for key '(.+?)'");
 
@@ -60,7 +69,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MethodArgumentNotValidException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public Result handleMethodArgumentNotValidException(MethodArgumentNotValidException ex) {
-        log.error("参数校验异常：{}", ex.getMessage(), ex);
+        log.warn("参数校验失败，字段：{}", ex.getBindingResult().getFieldErrors().stream().map(org.springframework.validation.FieldError::getField).toList());
         // 获取所有校验失败的字段和错误信息
         String errorMessage = ex.getBindingResult().getFieldErrors().stream()
                 .map(fieldError -> fieldError.getField() + ": " + fieldError.getDefaultMessage())
@@ -79,7 +88,7 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
     public Result handleException(Exception ex) {
         log.error("未知异常：{}", ex.getMessage(), ex);
-        String message = StringUtils.hasLength(ex.getMessage()) ? ex.getMessage() : MessageConstant.UNKNOWN_ERROR;
+        String message = "服务暂时不可用，请凭请求编号排查：" + java.util.Objects.toString(org.slf4j.MDC.get("requestId"), "unknown");
         return errorResult(message);
     }
 }

@@ -71,6 +71,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     @Autowired
     private SessionService sessions;
     @Autowired
+    private com.vibemusic.workspace.WorkspaceService workspace;
+    @Autowired
     private MinioService minioService;
     @Resource
     private UserFavoriteMapper userFavoriteMapper;
@@ -424,6 +426,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 
 
 
+        workspace.purgeUser(userId);
         // 删除用户
         // 先删除用户收藏和用户反馈（tb_feedback 的外键是 RESTRICT，不删会阻断用户删除；tb_comment 外键为 CASCADE，无需手动删除）
         userFavoriteMapper.delete(new QueryWrapper<UserFavorite>().eq("user_id", userId));

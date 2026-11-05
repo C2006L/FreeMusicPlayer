@@ -194,3 +194,29 @@ html.dark {
       rgba(0, 0, 0, 0)
     );
 }
+
+/* 手机端：分页只保留翻页控件，加大点击目标，避免横向溢出 */
+@media (max-width: 767px) {
+  .el-pagination {
+    justify-content: center;
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+  .el-pagination .el-pagination__total,
+  .el-pagination .el-pagination__sizes,
+  .el-pagination .el-pagination__jump {
+    display: none;
+  }
+  .el-pagination .el-pager {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .el-pagination .el-pager li,
+  .el-pagination button {
+    min-width: 44px;
+    height: 44px;
+    line-height: 44px;
+  }
+  .el-drawer { max-width: 100vw; }
+}

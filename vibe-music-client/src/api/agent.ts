@@ -1,8 +1,9 @@
 import { UserStore } from '@/stores/modules/user'
 import type { Song } from '@/api/interface'
 import { createSseParser } from '@/utils/sse'
+import { resolveApiBase } from '@/utils/apiBase'
 
-const BASE_URL = import.meta.env.VITE_APP_BASE_API || 'http://localhost:18080'
+const BASE_URL = resolveApiBase()
 export const cancelAgentChat = async () => {
   const token = UserStore().userInfo?.token
   await fetch(`${BASE_URL}/agent/cancel`, { method: 'POST', credentials: 'include',
@@ -16,7 +17,7 @@ export const getAgentStatus = async () => {
 
 export const streamAgentChat = async (
   conversationId: string, query: string, onDelta: (delta: string) => void,
-  signal?: AbortSignal, onSongs?: (songs: Song[]) => void
+  signal?: AbortSignal, onSongs?: (songs: Song[]) => void, completeOnly = false, onStatus?: (message: string) => void
 ): Promise<void> => {
   const controller = new AbortController()
   let timedOut = false
@@ -30,7 +31,7 @@ export const streamAgentChat = async (
     const response = await fetch(`${BASE_URL}/agent/chat`, {
       method: 'POST', credentials: 'include',
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      body: JSON.stringify({ conversationId, query }), signal: controller.signal,
+      body: JSON.stringify({ conversationId, query, completeOnly }), signal: controller.signal,
     })
     if (!response.ok || !response.body) {
       throw new Error(response.status === 404 ? '机器人接口不存在，请启动新版 FreeMusicPlayer 后端'
@@ -40,6 +41,7 @@ export const streamAgentChat = async (
     let completed = false
     const parser = createSseParser(({ event, data }) => {
       if (event === 'error') throw new Error(data)
+      if (event === 'status') { onStatus?.(data); return }
       if (event === 'songs') {
         const songs = JSON.parse(data)
         if (Array.isArray(songs)) onSongs?.(songs.filter(s => s && s.songId && s.songName && s.audioUrl))

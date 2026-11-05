@@ -10,6 +10,8 @@ import java.util.List;
 /** Incremental, restart-safe upgrades for existing databases as well as fresh Docker installs. */
 @Component
 public class SchemaMigrationRunner implements ApplicationRunner {
+    private volatile boolean ready;
+    public boolean isReady() { return ready; }
     private final JdbcTemplate jdbc;
     public SchemaMigrationRunner(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
@@ -25,6 +27,7 @@ public class SchemaMigrationRunner implements ApplicationRunner {
             finally { db.execute("DO RELEASE_LOCK('fmp-schema')"); }
             return null;
         });
+        ready = true;
     }
 
     private void migrate(JdbcTemplate db) {
@@ -51,6 +54,14 @@ public class SchemaMigrationRunner implements ApplicationRunner {
             }
             db.execute("UPDATE tb_song SET source='legacy-local',media_status='disabled' WHERE source='local' AND (audio_url LIKE 'http://localhost:9000/%' OR cover_url LIKE 'http://localhost:9000/%')");
             db.update("INSERT INTO fmp_schema_history(version) VALUES ('20261024-online')");
+        }
+        if (db.queryForObject("SELECT COUNT(*) FROM fmp_schema_history WHERE version='20261025-workspace'", Integer.class) == 0) {
+            try {
+                String sql = new org.springframework.core.io.ClassPathResource("db/20261025-workspace.sql")
+                        .getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+                for (String statement : sql.split(";")) if (!statement.isBlank()) db.execute(statement);
+                db.update("INSERT INTO fmp_schema_history(version) VALUES ('20261025-workspace')");
+            } catch (java.io.IOException e) { throw new IllegalStateException("Workspace migration missing", e); }
         }
     }
 }

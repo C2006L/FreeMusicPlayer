@@ -1,0 +1,10 @@
+.git
+.runtime
+**/node_modules
+**/target
+**/dist
+**/.env*.local
+deploy/.env
+.idea
+**/application-dev.yml
+**/.env.development*

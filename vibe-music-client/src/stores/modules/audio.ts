@@ -35,9 +35,11 @@ export const AudioStore = defineStore({
       const tracksToAdd = Array.isArray(newTracks) ? newTracks : [newTracks]
       for (const track of tracksToAdd) {
         if (existingIds.has(track.id)) {
-          this.currentSongIndex = this.trackList.findIndex(
+          const index = this.trackList.findIndex(
             (existingTrack: { id: string }) => existingTrack.id === track.id
           )
+          this.trackList[index] = { ...this.trackList[index], ...track }
+          this.currentSongIndex = index
           break
         } else {
           this.trackList.push(track)

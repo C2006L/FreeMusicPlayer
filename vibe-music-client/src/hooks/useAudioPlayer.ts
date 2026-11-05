@@ -7,6 +7,8 @@ import { sameRecording, classifyMedia, fullyPlayed, alternativeTier } from '@/ut
 import { usePlaybackEvidence, resourceIdentity } from '@/stores/modules/playbackEvidence'
 import { songToTrack } from '@/utils/songTrack'
 import { rebuildOnlineTrack } from '@/utils/mediaResources'
+import { resolveApiBase } from '@/utils/apiBase'
+import { createUuid } from '@/utils/uuid'
 import { usePlayHistory } from '@/stores/modules/playHistory'
 import { UserStore } from '@/stores/modules/user'
 interface AudioPlayer {
@@ -40,7 +42,7 @@ export const AudioPlayer = () => {
   const evidence = usePlaybackEvidence()
   const history = usePlayHistory()
   const user = UserStore()
-  const apiBase = import.meta.env.VITE_APP_BASE_API || 'http://localhost:18080'
+  const apiBase = resolveApiBase()
   const audioElement = ref<HTMLAudioElement | null>(null)
   const isPlaying = ref(false)
   const playbackRequested = ref(false)
@@ -70,7 +72,7 @@ export const AudioPlayer = () => {
   let historyRecorded = false
   let lastObservedTime = 0
   let lastObservedWall = 0
-  let reportSession = crypto.randomUUID(), reportOffset = 0, lastReported = 0
+  let reportSession = createUuid(), reportOffset = 0, lastReported = 0
   let stallTimer: ReturnType<typeof setTimeout> | undefined
   const clearStall = () => { if (stallTimer) clearTimeout(stallTimer); stallTimer=undefined;isBuffering.value=false }
   const armStall = () => {
@@ -88,7 +90,7 @@ export const AudioPlayer = () => {
       .catch(()=>{if(reportSession===session && lastReported===seconds)lastReported=previous})
   }
   const flushListening = () => reportListening(loadedTrack,true)
-  watch(()=>user.userInfo.userId,()=>{reportSession=crypto.randomUUID();reportOffset=playedSeconds;lastReported=0})
+  watch(()=>user.userInfo.userId,()=>{reportSession=createUuid();reportOffset=playedSeconds;lastReported=0})
 
   const onlineSources = [
     'netease', 'qq', 'kugou', 'kuwo', 'migu', 'qianqian',
@@ -260,7 +262,7 @@ export const AudioPlayer = () => {
     audioElement.value?.removeAttribute('src')
     currentTime.value = 0; seekingTime.value = 0; duration.value = 0; isSeeking.value = false
     playedSeconds = 0
-    reportSession=crypto.randomUUID();reportOffset=0;lastReported=0
+    reportSession=createUuid();reportOffset=0;lastReported=0
     historyRecorded = false
     lastObservedTime = 0
     lastObservedWall = performance.now()

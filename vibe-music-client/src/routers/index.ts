@@ -16,6 +16,7 @@ const router = createRouter({
   strict: false,
   scrollBehavior: () => ({ left: 0, top: 0 }),
   routes: [
+    { path: '/workspace', component: () => import('@/pages/workspace/index.vue') },
     { path: '/status', component: () => import('@/pages/status/index.vue') },
     {
       path: '/',

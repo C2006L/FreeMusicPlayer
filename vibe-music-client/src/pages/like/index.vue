@@ -4,10 +4,13 @@ import type { Song } from '@/api/interface'
 import coverImg from '@/assets/cover.png'
 import { AudioStore } from '@/stores/modules/audio'
 import { useRoute } from 'vue-router'
+import { useMediaQuery } from '@vueuse/core'
+
+const isPhone = useMediaQuery('(max-width: 767px)')
 
 const route = useRoute()
 const audui = AudioStore()
-const { loadTrack, play } = useAudioPlayer()
+const { play } = useAudioPlayer()
 
 const songs = ref<Song[]>([])
 const searchKeyword = ref('')
@@ -68,8 +71,7 @@ const handlePlayAll = async () => {
 
     audui.setAudioStore('trackList', result)
     audui.setAudioStore('currentSongIndex', 0)
-    await loadTrack()
-    play()
+    await play()
 }
 
 // 监听当前页面歌曲列表的变化
@@ -97,7 +99,7 @@ onMounted(() => {
 
 <template>
   <div class="flex flex-col h-full bg-background flex-1 md:overflow-hidden">
-    <div class="flex flex-col md:flex-row p-6 gap-6">
+    <div class="flex flex-col md:flex-row p-6 max-sm:p-4 gap-6">
       <div class="flex-shrink-0 w-60 h-60">
         <img :alt="playlist.name" class="w-full h-full object-cover rounded-lg shadow-lg"
           :src="playlist.coverImgUrl + '?param=500y500'" />
@@ -113,18 +115,18 @@ onMounted(() => {
             </el-tag>
           </div>
         </div>
-        <div class="flex items-center justify-between mt-4">
+        <div class="flex flex-wrap items-center justify-between gap-3 mt-4">
           <button @click="handlePlayAll"
-            class="text-white inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-10 rounded-lg px-8">
+            class="text-white inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-10 max-sm:h-11 rounded-lg px-8">
             <icon-solar:play-line-duotone />
             播放全部
           </button>
 
-          <div class="relative">
+          <div class="relative max-sm:w-full max-sm:flex-1">
             <icon-akar-icons:search
               class="lucide lucide-search absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" />
             <input v-model="searchKeyword" @keyup.enter="handleSearch"
-              class="flex h-10 rounded-lg border border-input transform duration-300 bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-0 pl-10 w-56"
+              class="flex h-10 rounded-lg border border-input transform duration-300 bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-0 pl-10 w-56 max-sm:w-full"
               placeholder="搜索" />
           </div>
         </div>
@@ -137,6 +139,7 @@ onMounted(() => {
         v-model:page-size="pageSize"
         :total="playlist.trackCount"
         :page-sizes="[10, 20, 30, 50]"
+        :pager-count="isPhone ? 5 : 7"
         layout="total, sizes, prev, pager, next, jumper"
         @size-change="getSongs"
         @current-change="getSongs"

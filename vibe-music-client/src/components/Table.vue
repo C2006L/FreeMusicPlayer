@@ -10,6 +10,7 @@ import { songToTrack } from '@/utils/songTrack'
 import { usePlaybackEvidence } from '@/stores/modules/playbackEvidence'
 import { evidenceLabel } from '@/utils/playbackPolicy'
 import { availabilityKey, probeAvailabilityOnDemand, rememberGrade, rememberedGrade } from '@/utils/availabilityProbe'
+import { resolveResourceUrl } from '@/utils/apiBase'
 
 const props = defineProps({
   data: { type: Array as PropType<Song[]>, default: () => [] },
@@ -55,6 +56,7 @@ const handleCoverError = (event: Event) => {
   const image = event.target as HTMLImageElement
   if (image.src !== defaultAlbum) image.src = defaultAlbum
 }
+const coverOf = (song: Song) => resolveResourceUrl(song.coverUrl) || defaultAlbum
 
 watch(() => props.data, (songs) => audio.setCurrentPageSongs(songs), { immediate: true })
 
@@ -143,13 +145,13 @@ const isCurrent = (song: Song) => {
     <div v-else class="song-list__body">
       <article v-for="song in data" :key="songKey(song)" class="song-row group"
         :class="{ 'is-current': isCurrent(song), 'is-selected': selectedId === songKey(song) }" tabindex="0"
-        :aria-current="isCurrent(song) ? 'true' : undefined" @click="selectedId = songKey(song)"
+        :aria-current="isCurrent(song) ? 'true' : undefined" @click="selectedId = songKey(song); requestProbe(song)"
         @mouseenter="requestProbe(song)" @focusin="requestProbe(song)"
         @dblclick="handlePlay(song)" @keydown.enter="handlePlay(song)">
         <div class="song-primary">
           <span class="playing-rail" aria-hidden="true" />
           <button class="cover-button" :aria-label="`播放 ${song.songName}`" @click.stop="handlePlay(song)">
-            <img :src="song.coverUrl || defaultAlbum" :alt="`${song.songName} 封面`" loading="lazy" @error="handleCoverError" />
+            <img :src="coverOf(song)" :alt="`${song.songName} 封面`" loading="lazy" @error="handleCoverError" />
             <span class="cover-overlay"><PlayingIndicator v-if="isCurrent(song)" :paused="!isPlaying" /><icon-tabler:player-play-filled v-else /></span>
           </button>
           <div class="min-w-0">
@@ -196,6 +198,20 @@ const isCurrent = (song: Song) => {
 .state-action { margin-top:8px; border:1px solid hsl(var(--border)); border-radius:6px; padding:7px 14px; color:hsl(var(--foreground)); font-size:12px; }
 .song-skeleton { display:grid; min-height:60px; grid-template-columns:44px 1fr; align-items:center; gap:12px; padding-inline:12px; border-bottom:1px solid hsl(var(--border)/.45); }
 @media(max-width:840px){.song-list__header,.song-row{grid-template-columns:minmax(220px,1fr) 54px 108px}.song-album,.song-list__header span:nth-child(2){display:none}}
+@media(max-width:767px){
+  .song-list__header{display:none}
+  .song-row{display:flex;min-height:68px;gap:8px;padding:8px 6px}
+  .song-row:active{background:hsl(var(--muted)/.54)}
+  .song-primary{flex:1 1 auto;grid-template-columns:44px minmax(0,1fr);gap:10px}
+  .song-album,.song-duration{display:none}
+  .song-actions{flex:none;gap:0}
+  .row-action{width:44px;height:44px}
+  .secondary-action{opacity:1}
+  .song-row .song-primary .flex{flex-wrap:wrap;row-gap:2px}
+  .song-row .song-primary strong{flex:1 1 100%}
+  .song-row .cover-overlay{opacity:0}
+  .is-current .cover-overlay{opacity:1}
+}
 @media(max-width:560px){.song-list__header{display:none}.song-row{grid-template-columns:minmax(0,1fr) 90px;gap:8px}.song-duration{display:none}}
 .availability-badge.is-unknown { color:hsl(var(--muted-foreground));background:hsl(var(--muted)/.5); }
 </style>

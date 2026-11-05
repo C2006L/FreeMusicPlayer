@@ -15,7 +15,7 @@ const favoriteStore = useFavoriteStore()
 const userStore = UserStore()
 const playlist = computed(() => playlistStore.playlist)
 const songs = computed(() => playlistStore.songs)
-const { loadTrack, play } = useAudioPlayer()
+const { play } = useAudioPlayer()
 
 // 添加激活的选项卡变量
 const activeTab = ref('songs')
@@ -229,20 +229,19 @@ const handlePlayAll = async () => {
 
   audui.setAudioStore('trackList', result)
   audui.setAudioStore('currentSongIndex', 0)
-  await loadTrack()
-  play()
+  await play()
 }
 </script>
 <template>
   <div class="flex flex-col h-full bg-background flex-1 md:overflow-hidden">
-    <div class="flex flex-col md:flex-row p-6 gap-6">
+    <div class="flex flex-col md:flex-row p-6 max-sm:p-4 gap-6">
       <div class="flex-shrink-0 w-60 h-60">
         <img :alt="playlist?.name" class="w-full h-full object-cover rounded-lg shadow-lg"
           :src="(playlist?.coverImgUrl || coverImg) + '?param=500y500'" />
       </div>
       <div class="flex flex-col justify-between">
         <div>
-          <h1 class="text-3xl font-bold mb-2">{{ playlist?.name }}</h1>
+          <h1 class="text-3xl font-bold mb-2 break-words">{{ playlist?.name }}</h1>
           <p class="text-muted-foreground mb-4 line-clamp-2" :title="playlist?.description">
             {{ playlist?.description }}
           </p>
@@ -261,11 +260,11 @@ const handlePlayAll = async () => {
         </div>
         <div class="flex items-center gap-4 mt-4">
           <button @click="handlePlayAll"
-            class="text-white inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-10 rounded-lg px-8">
+            class="text-white inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-10 max-sm:h-11 rounded-lg px-8">
             <icon-solar:play-line-duotone />
             播放全部</button>
           <button @click="toggleCollect"
-            class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-hoverMenuBg h-10 w-10 rounded-lg border-2 border-gray-300"
+            class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-hoverMenuBg h-10 w-10 max-sm:h-11 max-sm:w-11 rounded-lg border-2 border-gray-300"
             :class="{ 'text-red-500': isCollected }">
             <icon-ic:round-favorite v-if="isCollected" class="text-xl" />
             <icon-ic:round-favorite-border v-else class="text-xl" />
@@ -298,8 +297,8 @@ const handlePlayAll = async () => {
         </div>
         <div v-show="activeTab === 'comments'" class="py-4">
           <!-- 评论输入框 -->
-          <div class="p-4 mb-4">
-            <div class="flex items-start gap-3 mr-8">
+          <div class="p-4 mb-4 max-sm:p-0">
+            <div class="flex items-start gap-3 mr-8 max-sm:mr-0">
               <div class="flex-1">
                 <el-input
                   v-model="commentContent"
@@ -312,7 +311,7 @@ const handlePlayAll = async () => {
                 />
                 <div class="flex justify-end items-center mt-4 mr-1">
                   <button @click="handleComment" :disabled="!commentContent.trim()"
-                    class="px-6 py-1.5 bg-primary text-white rounded-full text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-primary/90 transition-colors">
+                    class="px-6 py-1.5 max-sm:min-h-[44px] bg-primary text-white rounded-full text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-primary/90 transition-colors">
                     发布
                   </button>
                 </div>
@@ -321,11 +320,11 @@ const handlePlayAll = async () => {
           </div>
 
           <!-- 评论列表 -->
-          <div class="mb-6 ml-6">
+          <div class="mb-6 ml-6 max-sm:ml-0">
             <h3 class="font-bold mb-4">最新评论（{{ formatNumber(playlist?.commentCount ?? 0) }}）</h3>
             <div v-if="comments.length">
               <template v-for="comment in comments" :key="comment.commentId">
-                <div class="flex gap-3 py-4 group mr-12">
+                <div class="flex gap-3 py-4 group mr-12 max-sm:mr-0">
                   <div class="w-10 h-10 rounded-full overflow-hidden flex-shrink-0 mt-0.5">
                     <img :src="comment.userAvatar || coverImg" alt="avatar" class="w-full h-full object-cover" />
                   </div>
@@ -356,7 +355,7 @@ const handlePlayAll = async () => {
                     </div>
                   </div>
                 </div>
-                <div class="border-b border-gray-300/70 mr-12"></div>
+                <div class="border-b border-gray-300/70 mr-12 max-sm:mr-0"></div>
               </template>
             </div>
             <div v-else class="text-center py-8 text-gray-500">

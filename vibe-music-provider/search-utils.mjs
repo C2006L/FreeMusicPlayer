@@ -11,10 +11,13 @@ export const relevanceScore = (song, keyword) => {
   const artist = normalizeForRank(song.artist)
   const terms = String(keyword).trim().split(/\s+/).map(normalizeForRank).filter(Boolean)
   let score = name === query ? 100 : name.startsWith(query) ? 80 : name.includes(query) ? 60 : 0
-  if (artist === query) score += 50
+  if (artist === query) score += 130
   else if (artist.includes(query)) score += 25
+  if (terms.some(term => name === term)) score += 100
+  if (terms.some(term => artist === term)) score += 80
   score += terms.filter(term => name.includes(term) || artist.includes(term)).length * 15
   if (song.availability === 'unavailable') score -= 30
   if (song.availability === 'restricted') score -= 8
+  if (Number(song.duration) > 0) score += 2
   return score
 }

@@ -1,0 +1,74 @@
+name: freemusicplayer-production
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: vibe_music
+      MYSQL_USER: vibe_music
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD}
+      TZ: Asia/Shanghai
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: [CMD-SHELL, 'MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysqladmin ping -h localhost -uroot --silent']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
+    command: [sh, -c, 'exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"']
+    volumes: [redis-data:/data]
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep -q PONG']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  go-music-api:
+    image: guohuiyuan/go-music-api:latest@sha256:3e026fa42a6b262fd3df1aab0058c6b965e7a5b7d068aa7525c7c7605b9378e4
+    restart: unless-stopped
+  provider:
+    build: {context: .., dockerfile: deploy/provider.Dockerfile}
+    restart: unless-stopped
+    environment:
+      GO_MUSIC_API_URL: http://go-music-api:8080
+    depends_on: [go-music-api]
+  backend:
+    build: {context: .., dockerfile: deploy/backend.Dockerfile}
+    restart: unless-stopped
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
+      VIBE_MUSIC_JWT_SECRET: ${VIBE_MUSIC_JWT_SECRET:?Set VIBE_MUSIC_JWT_SECRET}
+      FMP_ADMIN_USERNAME: ${FMP_ADMIN_USERNAME:?Set FMP_ADMIN_USERNAME}
+      FMP_ADMIN_PASSWORD: ${FMP_ADMIN_PASSWORD:?Set FMP_ADMIN_PASSWORD}
+      FMP_PUBLIC_API_URL: ${FMP_PUBLIC_API_URL:?Set FMP_PUBLIC_API_URL}
+      FMP_ALLOWED_ORIGINS: ${FMP_ALLOWED_ORIGINS}
+      SMTP_HOST: ${SMTP_HOST:?Set SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:?Set SMTP_USERNAME}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:?Set SMTP_PASSWORD}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+      SMTP_SSL: ${SMTP_SSL:-false}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:3b}
+    depends_on:
+      mysql: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      provider: {condition: service_started}
+  web:
+    build: {context: .., dockerfile: deploy/web.Dockerfile}
+    restart: unless-stopped
+    ports:
+      - '${FMP_WEB_BIND:-127.0.0.1}:${FMP_WEB_PORT:-8880}:80'
+      - '${FMP_WEB_BIND:-127.0.0.1}:${FMP_ADMIN_PORT:-8881}:81'
+    depends_on: [backend]
+volumes:
+  mysql-data:
+  redis-data:

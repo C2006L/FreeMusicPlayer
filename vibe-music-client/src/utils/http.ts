@@ -8,6 +8,7 @@ import NProgress from '@/config/nprogress'
 import 'nprogress/nprogress.css'
 import { UserStore } from '@/stores/modules/user'
 import { ElMessage } from 'element-plus'
+import { resolveApiBase } from '@/utils/apiBase'
 declare module 'axios' {
   interface AxiosRequestConfig {
     quiet?: boolean
@@ -15,7 +16,7 @@ declare module 'axios' {
 }
 
 const instance: AxiosInstance = axios.create({
-  baseURL: import.meta.env.VITE_APP_BASE_API || 'http://localhost:18080',
+  baseURL: resolveApiBase(),
   timeout: 20000, // 设置超时时间 20秒
   headers: {
     Accept: 'application/json, text/plain, */*',

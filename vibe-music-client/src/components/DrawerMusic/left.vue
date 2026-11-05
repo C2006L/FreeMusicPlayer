@@ -4,13 +4,17 @@ import { Icon } from '@iconify/vue'
 import type { SongDetail } from '@/api/interface'
 import { inject, type Ref } from 'vue'
 import { useAudioPlayer } from '@/hooks/useAudioPlayer'
+import { resolveApiBase } from '@/utils/apiBase'
 import vinylImg from '@/assets/vinyl.png'
 import Recently from '../../layout/components/footer/components/recently.vue'
-import defaultAlbum from '@/assets/default_album.jpg'
+import MusicCover from '@/components/MusicCover.vue'
+import { rebuildOnlineTrack } from '@/utils/mediaResources'
+import BilibiliCollection from '@/components/BilibiliCollection.vue'
 
 const {
   currentTrack,
   isPlaying,
+  playbackRequested,
   currentTime,
   duration,
   nextTrack,
@@ -22,10 +26,7 @@ const {
 } = useAudioPlayer()
 
 const songDetail = inject<Ref<SongDetail | null>>('songDetail')
-const handleCoverError = (event: Event) => {
-  const image = event.target as HTMLImageElement
-  if (image.src !== defaultAlbum) image.src = defaultAlbum
-}
+const currentCover = computed(() => rebuildOnlineTrack(currentTrack.value, resolveApiBase()).cover)
 
 // 添加播放模式相关逻辑
 const playModes = {
@@ -65,11 +66,10 @@ const togglePlayMode = () => {
       <!-- 封面 -->
       <div :class="` ${isPlaying ? 'is-playing' : ''}`">
         <div class="album">
-          <img
+          <MusicCover
             class="album-art rounded-md"
-            :src="currentTrack.cover || songDetail?.coverUrl || defaultAlbum"
+            :src="currentCover || songDetail?.coverUrl"
             :alt="songDetail?.songName || currentTrack.title"
-            @error="handleCoverError"
           />
           <div
             class="vinyl"
@@ -82,12 +82,13 @@ const togglePlayMode = () => {
       </div>
       <!-- 标题类 -->
       <div class="flex flex-col items-center gap-2 mt-10">
-        <h2 class="text-3xl font-bold text-primary-foreground">
+        <h2 class="track-title text-3xl font-bold text-primary-foreground" :title="currentTrack.title">
           {{ songDetail?.songName || currentTrack.title }}
         </h2>
         <p class="text-xl text-inactive">
           {{ songDetail?.artistName || currentTrack.artist }}
         </p>
+        <div class="flex items-center gap-2"><BilibiliCollection /><span v-if="currentTrack.collectionIndex" class="text-xs text-muted-foreground">合集 {{ currentTrack.collectionIndex }} / {{ currentTrack.collectionSize }}</span></div>
       </div>
       <!-- 控制区 -->
       <div class="flex gap-2 w-full items-center justify-center mt-8">
@@ -124,7 +125,7 @@ const togglePlayMode = () => {
         <el-button text circle class="!p-3" @click="togglePlayPause">
           <Icon
             :icon="
-              isPlaying
+              playbackRequested
                 ? 'ic:round-pause-circle'
                 : 'material-symbols:play-circle'
             "
@@ -144,6 +145,7 @@ const togglePlayMode = () => {
 </template>
 
 <style scoped lang="scss">
+.track-title { max-width:100%; padding-inline:20px; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow-wrap:anywhere; font-size:clamp(20px,2vw,30px); }
 .album {
   box-shadow: 3px 3px 15px rgba(0, 0, 0, 0.65);
   height: 100%;

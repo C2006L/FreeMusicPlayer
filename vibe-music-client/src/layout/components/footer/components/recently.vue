@@ -2,15 +2,14 @@
 import { formatMillisecondsToTime } from '@/utils'
 import { trackModel } from '@/stores/interface'
 const audio = AudioStore()
-const { loadTrack, play, audioElement, isPlaying } = useAudioPlayer()
+const { play, audioElement, isPlaying } = useAudioPlayer()
 
 const mouseOverIndex = ref(-1) // 用于跟踪鼠标悬停的索引
 
 const playMusic = async (song: trackModel) => {
   audio.addTracks(song)
   // 加载
-  await loadTrack()
-  play()
+  await play()
 }
 
 const handleClearAll = () => {

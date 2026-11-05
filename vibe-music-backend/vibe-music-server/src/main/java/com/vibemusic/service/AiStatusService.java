@@ -36,7 +36,12 @@ public class AiStatusService {
                     if (model.equals(item.path("name").asText())) return state("UP", true, "本机模型可用");
                 }
                 return state("MODEL_MISSING", false, "Ollama 中未找到配置的模型 " + model);
-            } catch (Exception e) { return state("DOWN", false, "无法连接本机 Ollama，请启动 Ollama 服务"); }
+            } catch (Exception e) {
+                Throwable cause=e;
+                while(cause.getCause()!=null)cause=cause.getCause();
+                if(cause instanceof java.net.ConnectException)return state("DOWN",false,"无法连接 Ollama，检查服务是否启动");
+                return state("UNKNOWN",false,"模型状态检查超时或失败，可重试；这不代表服务已停止");
+            }
         }
         if ("dashscope".equals(provider)) {
             boolean configured = cloudKey != null && !cloudKey.isBlank() && !"not-configured".equals(cloudKey);

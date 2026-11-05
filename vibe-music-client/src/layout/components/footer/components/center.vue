@@ -10,14 +10,19 @@ import { useRoute } from 'vue-router'
 import { useLibraryStore } from '@/stores/modules/library'
 import { useArtistStore } from '@/stores/modules/artist'
 import { usePlaylistStore } from '@/stores/modules/playlist'
+import { usePlaybackEvidence } from '@/stores/modules/playbackEvidence'
+import { evidenceLabel } from '@/utils/playbackPolicy'
 
 const userStore = UserStore()
 const audioStore = AudioStore()
 const route = useRoute()
 const libraryStore = useLibraryStore()
+const evidence = usePlaybackEvidence()
 
 const {
+  isBuffering,
   isPlaying,
+  playbackRequested,
   currentTime,
   duration,
   currentTrack,
@@ -163,11 +168,11 @@ const handleLike = async () => {
       <button
         @click="togglePlayPause"
         class="play-button"
-        :aria-label="isPlaying ? '暂停' : '播放'"
+        :aria-label="playbackRequested ? '暂停' : '播放'"
       >
         <Icon
           :icon="
-            isPlaying ? 'ic:round-pause-circle' : 'material-symbols:play-circle'
+            playbackRequested ? 'ic:round-pause-circle' : 'material-symbols:play-circle'
           "
           class="text-3xl"
         />
@@ -217,6 +222,8 @@ const handleLike = async () => {
         class="whitespace-nowrap rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-500"
       >仅试听</span>
       <span v-else-if="currentTrack.playbackStatus === 'error'" class="text-[10px] text-primary whitespace-nowrap">无法播放</span>
+      <span v-else-if="isBuffering" role="status" class="text-[10px] text-muted-foreground whitespace-nowrap">正在缓冲…</span>
+      <span v-else-if="currentTrack.source" class="whitespace-nowrap text-[10px] text-muted-foreground" title="完整性未知不表示播放错误；时长匹配也不等于已完整播完。">{{ evidence.get(currentTrack)==='unknown' && isPlaying ? '正在播放' : evidenceLabel(evidence.get(currentTrack)) }}</span>
     </div>
   </div>
 </template>
@@ -233,4 +240,5 @@ const handleLike = async () => {
 .progress-row { display: flex; min-width: 0; align-items: center; gap: 10px; }
 .time-label { width: 38px; flex: none; color: hsl(var(--muted-foreground)); font-size: 10px; font-variant-numeric: tabular-nums; text-align: center; }
 @media (max-width: 680px) { .player-center { padding-inline: 4px; } .progress-row { display: none; } .favorite-button { display: none; } }
+@media (max-width: 767px) { .transport-button { width: 44px; height: 44px; } .play-button { width: 44px; height: 44px; } .transport-controls { gap: 6px; } }
 </style>

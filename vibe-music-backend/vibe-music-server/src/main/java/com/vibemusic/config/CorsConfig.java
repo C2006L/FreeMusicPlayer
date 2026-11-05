@@ -20,7 +20,7 @@ public class CorsConfig {
                         .allowedOrigins(allowedOrigins.split(","))
                         .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS") // 加上 OPTIONS
                         .allowedHeaders("*") // 允许所有请求头
-                        .exposedHeaders("Authorization") // 允许前端获取 Authorization 头
+                        .exposedHeaders("Authorization", "X-Request-Id")
                         .allowCredentials(true); // 允许携带 Cookie 或 Token
             }
         };

@@ -131,6 +131,13 @@ public class SongController {
         }
     }
 
+    @GetMapping("/bilibiliCollection")
+    public Result<List<OnlineSongVO>> bilibiliCollection(@RequestParam String bvid) {
+        if (!bvid.matches("^BV[a-zA-Z0-9]{10}$")) return Result.error("无效的 B 站视频编号");
+        try { return Result.success(onlineMusicService.bilibiliCollection(bvid)); }
+        catch (Exception exception) { return Result.error("暂时无法获取 B 站目录，请稍后重试；当前播放队列未改变"); }
+    }
+
     @GetMapping("/streamOnline")
     public void streamOnline(
             @RequestParam String source,
@@ -175,7 +182,7 @@ public class SongController {
             return Result.success(onlineMusicService.lyrics(source, id,
                     resourceMetadata(name, artist, album, duration, null, extra, engine)));
         } catch (Exception exception) {
-            return Result.error("暂未找到这首歌的歌词");
+            return Result.error("歌词服务请求失败，请稍后重试");
         }
     }
 

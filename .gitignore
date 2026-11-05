@@ -8,3 +8,5 @@ others
 vibe-music-backend/vibe-music-server/src/main/resources/application-dev.yml
 vibe-music-client/.env.development.local
 vibe-music-provider/node_modules/
+deploy/.env
+tests/e2e/node_modules/

@@ -13,10 +13,17 @@ const router = useRouter()
 const user = UserStore()
 const favoriteStore = useFavoriteStore()
 const authVisible = ref(false)
+const props = defineProps({ mobile: { type: Boolean, default: false } })
+const emit = defineEmits<{ navigate: [] }>()
+
+const navigate = (path: string) => {
+  router.push(path)
+  if (props.mobile) emit('navigate')
+}
 
 // 处理需要登录的路由
 const handleProtectedRoute = (path: string) => {
-  if (!user.isLoggedIn && (path === '/like' || path === '/user')) {
+  if (!user.isLoggedIn && (path === '/like' || path === '/user' || path === '/workspace')) {
     ElMessage.warning('请先登录')
     authVisible.value = true
     return false
@@ -40,7 +47,8 @@ watch(
 
 <template>
   <aside
-    class="app-sidebar hidden h-full overflow-hidden border-r border-border md:block"
+    class="app-sidebar h-full overflow-hidden"
+    :class="mobile ? 'is-mobile flex w-full border-r-0' : 'hidden border-r border-border md:block'"
   >
     <nav
       class="menu-nav box-border flex h-full flex-1 flex-col gap-6 overflow-hidden px-3 py-5"
@@ -64,7 +72,7 @@ watch(
             'hover:bg-hoverMenuBg': route.path !== item2.router,
           }"
           @click="
-            handleProtectedRoute(item2.router) && router.push(item2.router)
+            handleProtectedRoute(item2.router) && navigate(item2.router)
           "
         >
           <Icon :icon="item2.icon" class="text-lg" />
@@ -109,7 +117,7 @@ watch(
                 'bg-activeMenuBg': route.path === `/playlist/${item.id}`,
                 'hover:bg-hoverMenuBg': route.path !== `/playlist/${item.id}`,
               }"
-              @click="router.push(`/playlist/${item.id}`)"
+              @click="navigate(`/playlist/${item.id}`)"
             >
               <el-image
                 lazy
@@ -139,6 +147,8 @@ watch(
 }
 
 .app-sidebar { width: var(--app-sidebar-width); flex: 0 0 var(--app-sidebar-width); background: hsl(var(--background)); }
+
+.app-sidebar.is-mobile { width: 100%; flex: 1 1 auto; }
 
 .menu-section {
   counter-increment: menu-section;
@@ -202,12 +212,14 @@ watch(
 }
 
 @media (max-width: 960px) {
-  .menu-section-title { width: 100%; overflow: hidden; white-space: nowrap; color: transparent; }
-  .menu-section-title::before { color: hsl(var(--muted-foreground)); }
-  .menu-section-title::after { display: none; }
-  .menu-item { justify-content: center; padding-inline: 0; }
-  .menu-item span, .playlist-link .flex-1 { display: none; }
-  .menu-item :deep(svg) { width: 21px; height: 21px; }
-  .playlist-link { justify-content: center; padding-inline: 0; }
+  .app-sidebar:not(.is-mobile) .menu-section-title { width: 100%; overflow: hidden; white-space: nowrap; color: transparent; }
+  .app-sidebar:not(.is-mobile) .menu-section-title::before { color: hsl(var(--muted-foreground)); }
+  .app-sidebar:not(.is-mobile) .menu-section-title::after { display: none; }
+  .app-sidebar:not(.is-mobile) .menu-item { justify-content: center; padding-inline: 0; }
+  .app-sidebar:not(.is-mobile) .menu-item span,
+  .app-sidebar:not(.is-mobile) .playlist-link .flex-1 { display: none; }
+  .app-sidebar:not(.is-mobile) .menu-item :deep(svg) { width: 21px; height: 21px; }
+  .app-sidebar:not(.is-mobile) .playlist-link { justify-content: center; padding-inline: 0; }
 }
+.app-sidebar.is-mobile .menu-item { min-height: 44px; }
 </style>

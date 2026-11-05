@@ -2,14 +2,14 @@
 import { ref } from 'vue'
 import { useAudioPlayer } from '@/hooks/useAudioPlayer'
 import DrawerMusic from '@/components/DrawerMusic/index.vue'
-import defaultAlbum from '@/assets/default_album.jpg'
+import MusicCover from '@/components/MusicCover.vue'
+import { rebuildOnlineTrack } from '@/utils/mediaResources'
+import { resolveApiBase } from '@/utils/apiBase'
+import BilibiliCollection from '@/components/BilibiliCollection.vue'
 
 const { currentTrack, isPlaying } = useAudioPlayer()
 const showDrawerMusic = ref(false)
-const handleCoverError = (event: Event) => {
-  const image = event.target as HTMLImageElement
-  if (image.src !== defaultAlbum) image.src = defaultAlbum
-}
+const currentCover = computed(() => rebuildOnlineTrack(currentTrack.value, resolveApiBase()).cover)
 </script>
 
 <template>
@@ -18,12 +18,11 @@ const handleCoverError = (event: Event) => {
     @click="showDrawerMusic = !showDrawerMusic"
   >
     <div class="h-14 w-14 flex-none overflow-hidden rounded-md bg-muted">
-      <img
-        :src="currentTrack.cover || defaultAlbum"
+      <MusicCover
+        :src="currentCover"
         :alt="currentTrack.title"
         decoding="async"
         class="h-full w-full object-cover"
-        @error="handleCoverError"
       />
     </div>
     <div class="min-w-0">
@@ -40,6 +39,7 @@ const handleCoverError = (event: Event) => {
         {{ currentTrack.artist }}
       </div>
     </div>
+    <BilibiliCollection />
     <DrawerMusic v-model="showDrawerMusic" />
   </div>
 </template>

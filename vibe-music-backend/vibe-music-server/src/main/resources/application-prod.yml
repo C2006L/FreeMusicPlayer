@@ -1,0 +1,33 @@
+spring:
+  servlet:
+    multipart:
+      enabled: false
+  mail:
+    host: ${SMTP_HOST}
+    port: ${SMTP_PORT:587}
+    username: ${SMTP_USERNAME}
+    password: ${SMTP_PASSWORD}
+    properties.mail.smtp:
+      auth: true
+      starttls.enable: ${SMTP_STARTTLS:true}
+      starttls.required: ${SMTP_STARTTLS:true}
+server:
+  forward-headers-strategy: framework
+vibe-music:
+  datasource:
+    url: jdbc:mysql://mysql:3306/vibe_music?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
+    username: vibe_music
+    password: ${MYSQL_PASSWORD}
+  redis:
+    host: redis
+    port: 6379
+    password: ${REDIS_PASSWORD}
+  minio:
+    enabled: false
+    endpoint: http://127.0.0.1:9000
+    accessKey: disabled
+    secretKey: disabled
+    bucket: disabled
+  online:
+    provider-url: http://provider:3001
+    provider-public-url: ${FMP_PUBLIC_API_URL}/song

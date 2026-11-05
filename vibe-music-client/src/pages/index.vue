@@ -8,12 +8,13 @@ import { evidenceLabel } from '@/utils/playbackPolicy'
 import { usePlayHistory } from '@/stores/modules/playHistory'
 import { rebuildOnlineTrack } from '@/utils/mediaResources'
 import MusicCover from '@/components/MusicCover.vue'
+import { resolveApiBase, resolveResourceUrl } from '@/utils/apiBase'
 
 const router = useRouter()
 const audio = AudioStore()
 const evidence = usePlaybackEvidence()
 const history = usePlayHistory()
-const apiBase = import.meta.env.VITE_APP_BASE_API || 'http://localhost:18080'
+const apiBase = resolveApiBase()
 const { play, isPlaying } = useAudioPlayer()
 
 const recommendedSongList = ref<any[]>([])
@@ -35,7 +36,7 @@ const handleRefreshSongs = async () => {
       id: item.songId,
       name: item.songName,
       artists: [{ name: item.artistName }],
-      album: { name: item.album, picUrl: item.coverUrl },
+      album: { name: item.album, picUrl: resolveResourceUrl(item.coverUrl) },
       duration: Number(item.duration) || 0,
       audioUrl: item.audioUrl,
       likeStatus: item.likeStatus || 0,
@@ -132,9 +133,9 @@ const isCurrentPlaying = (songId: number | string) => {
         </button>
       </div>
 
-      <div v-if="recommendedSongList.length" class="grid grid-cols-1 gap-x-16 gap-y-1 md:grid-cols-2">
+      <div v-if="recommendedSongList.length" class="recommended-grid grid grid-cols-1 gap-x-16 gap-y-1 md:grid-cols-2">
         <div v-for="(item, index) in recommendedSongList" :key="item.id"
-          class="group grid w-full cursor-pointer grid-cols-[auto_auto_2fr_1fr] items-center gap-4 rounded-md p-2 transition-all duration-200"
+          class="home-row group grid w-full cursor-pointer grid-cols-[auto_auto_2fr_1fr] items-center gap-4 rounded-md p-2 transition-all duration-200"
           :class="isCurrentPlaying(item.id) ? 'bg-activeMenuBg' : 'hover:bg-hoverMenuBg'"
           @click="handlePlayClick(item)">
           <span class="w-6 text-right font-serif-display text-xs tabular-nums text-muted-foreground">
@@ -155,7 +156,7 @@ const isCurrentPlaying = (songId: number | string) => {
             <p class="truncate text-sm text-muted-foreground">{{ item.artists.map((artist: any) => artist.name).join(' ') }}</p>
             <p class="text-[10px] text-muted-foreground">{{ songStatus(item) }}</p>
           </div>
-          <p class="mr-3 text-right text-sm tabular-nums text-muted-foreground">{{ Number(item.duration) > 0 ? formatTime(item.duration) : '--:--' }}</p>
+          <p class="home-duration mr-3 text-right text-sm tabular-nums text-muted-foreground">{{ Number(item.duration) > 0 ? formatTime(item.duration) : '--:--' }}</p>
         </div>
       </div>
 
@@ -197,5 +198,15 @@ const isCurrentPlaying = (songId: number | string) => {
 .cover-strip { display:grid; grid-template-columns:repeat(6,minmax(120px,1fr)); gap:18px; padding-top:18px; }
 .recent-cover { min-width:0; text-align:left; }.recent-cover__art { display:block; aspect-ratio:1; width:100%; overflow:hidden; border-radius:7px; background:hsl(var(--muted)); }.recent-cover strong,.recent-cover>span { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.recent-cover strong { margin-top:9px; font-size:13px; }.recent-cover>span:not(.recent-cover__art) { margin-top:2px; color:hsl(var(--muted-foreground)); font-size:11px; }
 @media(max-width:900px){.editorial-hero{grid-template-columns:1fr minmax(190px,.5fr)}.cover-strip{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:1023px){.recommended-grid{grid-template-columns:1fr}}
 @media(max-width:640px){.editorial-hero{grid-template-columns:1fr;min-height:auto}.feature-art{display:none}.cover-strip{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:767px){
+  .home-page{padding:18px 14px 24px}
+  .primary-action,.secondary-action{height:44px}
+  .section-heading{gap:8px}
+  .section-heading > div{min-width:0}
+  .section-heading > button{flex:none;white-space:nowrap;min-height:44px}
+  .home-row{grid-template-columns:auto auto minmax(0,1fr);gap:12px}
+  .home-duration{display:none}
+}
 </style>

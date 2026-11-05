@@ -8,6 +8,7 @@ const theme = themeStore()
 import { useDark, useToggle } from '@vueuse/core'
 
 const searchText = ref('')
+const mobileNav = defineModel<boolean>('mobileNav', { default: false })
 
 const isDark = useDark({
   selector: 'html',
@@ -47,6 +48,13 @@ watch(
 <template>
   <header class="app-header flex items-center border-b border-border px-4">
     <button
+      class="menu-trigger"
+      aria-label="打开导航菜单"
+      @click="mobileNav = true"
+    >
+      <Icon icon="mdi:menu" class="text-2xl" />
+    </button>
+    <button
       class="brand-button group flex items-center"
       @click="router.push('/')"
     >
@@ -83,15 +91,27 @@ watch(
         <Icon class="text-xl" :icon="currentIcon" />
       </button>
     </div>
-    <div class="ml-3 flex items-center gap-3"><Avatar /></div>
+    <div class="header-user ml-3 flex items-center gap-3"><Avatar /></div>
   </header>
 </template>
 
 <style scoped>
 .app-header { min-height: var(--app-header-height); background: hsl(var(--background) / .96); }
 .brand-button { width: calc(var(--app-sidebar-width) - 16px); flex: 0 0 auto; }
+.menu-trigger { display: none; place-items: center; width: 44px; height: 44px; margin-right: 2px; border-radius: 8px; color: hsl(var(--muted-foreground)); }
+.menu-trigger:active { background: hsl(var(--muted) / .7); }
 .icon-button { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 8px; color: hsl(var(--muted-foreground)); transition: color .15s ease, background .15s ease; }
 .icon-button:hover { color: hsl(var(--foreground)); background: hsl(var(--muted) / .7); }
 @media (max-width: 960px) { .brand-name { display: none; } .brand-button { width: 60px; justify-content: center; } }
+@media (max-width: 767px) {
+  .menu-trigger { display: grid; }
+  .app-header { padding-inline: 8px; gap: 2px; }
+  .brand-button { width: 40px; }
+  .header-tools { gap: 8px; }
+  .search-shell { max-width: none; }
+  .search-shell input { height: 44px; padding-inline: 36px 10px; }
+  .icon-button { width: 44px; height: 44px; }
+  .header-user { margin-left: 4px; gap: 0; }
+}
 @media (max-width: 640px) { .app-header { padding-inline: 10px; } .brand-button { width: 42px; } .search-shell { max-width: none; } }
 </style>

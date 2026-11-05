@@ -47,7 +47,7 @@ const openFeedbackDialog = () => {
         shape="circle"
         :size="32"
       />
-      <span class="text-sm font-medium mr-2 ml-1">{{
+      <span class="user-name text-sm font-medium mr-2 ml-1">{{
         user.userInfo.username
       }}</span>
       <icon-uiw:down />
@@ -81,3 +81,9 @@ const openFeedbackDialog = () => {
   <AuthTabs v-if="showLogin" v-model="showLogin" />
   <FeedbackDialog ref="feedbackDialogRef" />
 </template>
+
+<style scoped>
+@media (max-width: 767px) {
+  .user-name { display: none; }
+}
+</style>

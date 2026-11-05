@@ -30,6 +30,22 @@ pnpm dev
 
 默认访问地址为 <http://localhost:8090>，后端默认位于 <http://localhost:18080>。API 地址可通过 `VITE_APP_BASE_API` 设置。
 
+### 手机 / 平板联调
+
+在同一局域网内用手机打开 `http://<本机局域网IP>:8090` 时，后端地址不能再用 `localhost`：
+
+```powershell
+# 方式一：启动脚本自动把前后端公开地址指向局域网 IP
+$env:FMP_PUBLIC_HOST = '192.168.1.100'
+.\scripts\start-dev.ps1
+
+# 方式二：分别设置（已有值不会被脚本覆盖）
+$env:VITE_APP_BASE_API = 'http://192.168.1.100:18080'
+$env:VIBE_MUSIC_PROVIDER_PUBLIC_URL = 'http://192.168.1.100:18080/song'
+```
+
+`VITE_APP_BASE_API` 保留 `localhost` 时，前端会把发往本机回环地址的请求与媒体地址自动改写到当前页面主机；但播放代理地址由后端生成，仍建议同时设置 `VIBE_MUSIC_PROVIDER_PUBLIC_URL`。桌面默认的 `localhost` 开发方式不受影响。
+
 ## 验证
 
 ```powershell

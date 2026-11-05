@@ -10,6 +10,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      # The worker recovery check starts the real provider and needs its runtime dependency.
+      - run: npm ci
+        working-directory: vibe-music-provider
       - run: node --test *.test.mjs
         working-directory: vibe-music-provider
   backend:
@@ -53,3 +56,12 @@ jobs:
       - name: Build admin
         run: pnpm build
         working-directory: vibe-music-admin
+      - name: Install browser checks
+        run: npm ci
+        working-directory: tests/e2e
+      - name: Install Chromium
+        run: npx playwright install chromium
+        working-directory: tests/e2e
+      - name: Browser regression checks against built client
+        run: npm test
+        working-directory: tests/e2e

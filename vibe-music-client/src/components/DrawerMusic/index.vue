@@ -36,7 +36,7 @@ watch(
     if (newId && Number.isFinite(numericId) && numericId > 0 && !currentTrack.value.online) {
       try {
         const res = await getSongDetail(numericId)
-        if (res.code === 0 && res.data) {
+        if (currentTrack.value.id === newId && res.code === 0 && res.data) {
           // 确保返回的数据符合 SongDetail 接口
           const songData = res.data as unknown as SongDetail
           if (
@@ -69,7 +69,7 @@ provide('songDetail', songDetail)
     }"
     v-model="showDrawer"
     direction="btt"
-    size="100vh"
+    size="100dvh"
     append-to-body
     :modal="false"
     :showClose="false"
@@ -116,6 +116,11 @@ provide('songDetail', songDetail)
 :global(.now-playing-drawer.el-drawer) { background:hsl(var(--background)); color:hsl(var(--foreground)); }
 :global(.now-playing-drawer .el-drawer__header) { height:58px; margin:0; padding:0 22px; border-bottom:1px solid hsl(var(--border)); color:hsl(var(--foreground)); }
 :global(.now-playing-drawer .el-drawer__body) { min-height:0; padding:0; overflow:hidden; }
-:global(.now-playing-drawer .el-drawer__footer) { padding:8px 22px; border-top:1px solid hsl(var(--border)); }
+:global(.now-playing-drawer .el-drawer__footer) { padding:8px 22px calc(8px + env(safe-area-inset-bottom, 0px)); border-top:1px solid hsl(var(--border)); }
 @media(max-width:900px){.drawer-content{grid-template-columns:1fr}.player-pane{display:none}.lyrics-pane{height:100%}}
+@media(max-width:767px){
+  :global(.now-playing-drawer .el-drawer__header){padding-inline:10px}
+  :global(.now-playing-drawer .el-drawer__header .el-button){width:44px;height:44px}
+  :global(.now-playing-drawer .el-drawer__footer){padding-inline:16px}
+}
 </style>

@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Continue'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $pidRoot = Join-Path $projectRoot '.runtime\pids'
 
-foreach ($name in @('admin', 'client', 'backend', 'provider')) {
+foreach ($name in @('admin', 'client', 'backend', 'provider', 'provider-child')) {
     $pidFile = Join-Path $pidRoot "$name.pid"
     if (-not (Test-Path $pidFile)) { continue }
     $processId = [int](Get-Content $pidFile -Raw)

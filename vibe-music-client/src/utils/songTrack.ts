@@ -1,10 +1,11 @@
 import type { Song } from '@/api/interface'
 import type { trackModel } from '@/stores/interface'
 import defaultAlbum from '@/assets/default_album.jpg'
+import { resolveResourceUrl } from '@/utils/apiBase'
 
 export const songToTrack = (song: Song): trackModel => ({
   id: String(song.songId), title: song.songName, artist: song.artistName,
-  album: song.album, cover: song.coverUrl || defaultAlbum, url: song.audioUrl,
+  album: song.album, cover: resolveResourceUrl(song.coverUrl) || defaultAlbum, url: resolveResourceUrl(song.audioUrl),
   duration: Number(song.duration) || 0, likeStatus: song.likeStatus || 0,
   source: song.source, sourceName: song.sourceName, sourceSongId: song.sourceSongId,
   sourceUrlId: song.sourceUrlId, sourcePicId: song.sourcePicId,

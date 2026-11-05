@@ -26,7 +26,16 @@ if (-not (Test-Path $jwtSecretFile)) {
 }
 $env:VIBE_MUSIC_JWT_SECRET = ([System.IO.File]::ReadAllText($jwtSecretFile)).Trim()
 $backendPort = if ($env:FMP_BACKEND_PORT) { [int]$env:FMP_BACKEND_PORT } else { 18080 }
-$env:VITE_APP_BASE_API = "http://localhost:$backendPort"
+# Phone/tablet access: set FMP_PUBLIC_HOST to this machine's LAN IP. Existing
+# VITE_APP_BASE_API / VIBE_MUSIC_PROVIDER_PUBLIC_URL values are never overwritten,
+# so localhost remains the default for normal desktop development.
+$publicHost = $env:FMP_PUBLIC_HOST
+if (-not $env:VITE_APP_BASE_API) {
+    $env:VITE_APP_BASE_API = if ($publicHost) { "http://${publicHost}:$backendPort" } else { "http://localhost:$backendPort" }
+}
+if ($publicHost -and -not $env:VIBE_MUSIC_PROVIDER_PUBLIC_URL) {
+    $env:VIBE_MUSIC_PROVIDER_PUBLIC_URL = "http://${publicHost}:$backendPort/song"
+}
 
 function Wait-Port([int]$Port, [int]$TimeoutSeconds = 120) {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
@@ -88,7 +97,7 @@ if ($WithMail) {
 }
 
 $env:GO_MUSIC_API_URL = 'http://127.0.0.1:3002'
-Start-ManagedProcess 'provider' 'node.exe' @((Join-Path $projectRoot 'vibe-music-provider\server.mjs')) (Join-Path $projectRoot 'vibe-music-provider')
+Start-ManagedProcess 'provider' 'node.exe' @((Join-Path $projectRoot 'vibe-music-provider\supervise.mjs')) (Join-Path $projectRoot 'vibe-music-provider')
 Wait-Port 3001 30
 }
 

@@ -110,6 +110,7 @@ role-path-permissions:
       - "/admin/"
       - "/playlist-binding/"
     ROLE_USER:
+      - "/workspace/"
       - "/user/"
       - "/playlist/"
       - "/artist/"
