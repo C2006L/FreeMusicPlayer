@@ -2,7 +2,9 @@ param(
     [switch]$WithoutAdmin,
     [switch]$WithMinio,
     [switch]$WithMail,
-    [switch]$BackendOnly
+    [switch]$BackendOnly,
+    # Admin UI listens on 127.0.0.1 by default; enable only for LAN demos.
+    [switch]$ExposeAdmin
 )
 
 $ErrorActionPreference = 'Stop'
@@ -148,7 +150,8 @@ Wait-Port 8090 180
 
 if (-not $WithoutAdmin) {
     $adminVite = Join-Path $projectRoot 'vibe-music-admin\node_modules\vite\bin\vite.js'
-    Start-ManagedProcess 'admin' 'node.exe' @($adminVite, '--host', '0.0.0.0') (Join-Path $projectRoot 'vibe-music-admin')
+    $adminHost = if ($ExposeAdmin) { '0.0.0.0' } else { '127.0.0.1' }
+    Start-ManagedProcess 'admin' 'node.exe' @($adminVite, '--host', $adminHost) (Join-Path $projectRoot 'vibe-music-admin')
     Wait-Port 8089 180
 }
 

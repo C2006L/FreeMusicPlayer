@@ -23,4 +23,4 @@ vibe-music:
       api-key: ${DASHSCOPE_API_KEY:not-configured}
   online:
     provider-url: http://127.0.0.1:3001
-    provider-public-url: http://localhost:${FMP_BACKEND_PORT:18080}/song
+    provider-public-url: ${VIBE_MUSIC_PROVIDER_PUBLIC_URL:http://localhost:${FMP_BACKEND_PORT:18080}/song}

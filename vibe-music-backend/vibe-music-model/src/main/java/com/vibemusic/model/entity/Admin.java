@@ -55,4 +55,10 @@ public class Admin implements Serializable {
     @TableField("password")
     private String password;
 
+    /**
+     * 是否停用：0 正常，1 停用
+     */
+    @TableField("disabled")
+    private Integer disabled;
+
 }

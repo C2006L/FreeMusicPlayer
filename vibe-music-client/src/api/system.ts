@@ -147,9 +147,8 @@ export const searchOnlineProgressive = async (
   signal: AbortSignal,
   update: (songs: any[], states: Record<string, string>) => void
 ) => {
+  // 无登录态时网易云 / QQ 多数只返回试听片段，默认不纳入聚合搜索；仍可显式传入恢复。
   const selected = sources || [
-    'netease',
-    'qq',
     'kugou',
     'kuwo',
     'migu',

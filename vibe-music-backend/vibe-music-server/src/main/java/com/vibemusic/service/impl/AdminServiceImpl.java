@@ -80,6 +80,9 @@ public class AdminServiceImpl extends ServiceImpl<AdminMapper, Admin> implements
             recordLoginFailure(failureKey);
             return Result.error(MessageConstant.USERNAME + MessageConstant.ERROR);
         }
+        if (admin.getDisabled() != null && admin.getDisabled() != 0) {
+            return Result.error(MessageConstant.ACCOUNT_LOCKED);
+        }
 
         if (PasswordUtil.matches(adminDTO.getPassword(), admin.getPassword())) {
             stringRedisTemplate.delete(failureKey);

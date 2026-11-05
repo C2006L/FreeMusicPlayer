@@ -145,6 +145,25 @@ Maven Wrapper 和固定版本的 pnpm 会由脚本调用，无需全局单独安
 
 MinIO 本地开发账号为 `minioadmin / minioadmin`。MinIO 现在是可选的附件存储，只用于头像、封面及用户主动上传的媒体，不参与在线歌曲播放。这些凭据仅用于本机开发环境，请勿直接用于公网部署。
 
+本地开发管理端保留一个 BCrypt 账号 `admin_demo / Fmp2026Admin!`（仅开发库使用）；种子数据里的旧 MD5 管理员均已标记 `disabled = 1`，不再接受登录。生产环境首次启动由 `FMP_ADMIN_USERNAME` / `FMP_ADMIN_PASSWORD` 创建 BCrypt 管理员。
+
+### 手机 / 平板联调
+
+同一局域网内用手机或平板打开 `http://<本机局域网IP>:8090` 时，后端地址不能再用 `localhost`。先执行 `ipconfig` 确认当前 WLAN 的 IPv4 地址，再在**启动前**设置环境变量并重启前后端（只改配置不重启不生效）：
+
+```powershell
+$env:FMP_PUBLIC_HOST = '<本机局域网IP>'   # 脚本会自动推导 VITE_APP_BASE_API、播放代理地址和 FMP_ALLOWED_ORIGINS
+.\scripts\start-dev.ps1
+```
+
+也可以分别设置 `VITE_APP_BASE_API`、`VIBE_MUSIC_PROVIDER_PUBLIC_URL`、`FMP_ALLOWED_ORIGINS`（已有值不会被脚本覆盖），三者必须都指向局域网 IP，否则会出现请求被 CORS 拦截或播放地址仍指向 localhost。要点：
+
+- 手机页面与 API 端口不同，属于跨源请求，`FMP_ALLOWED_ORIGINS` 需包含 `http://<局域网IP>:8090`；桌面默认的 `localhost` 方式不受影响。
+- Windows 防火墙需放行入站 8090（用户端）和 18080（后端 API），否则手机只能打开页面、请求全部超时。
+- 局域网 IP 通常由 DHCP 分配，重启路由器或换网段后会变化，每次联调前重新确认。
+- 管理端默认只监听 `127.0.0.1`；确需让手机访问管理端时显式运行 `.\scripts\start-dev.ps1 -ExposeAdmin`。
+- 没有配置平台登录态（Cookie）时，网易云 / QQ 多数只返回试听片段，因此用户端默认搜索源不含这两个平台，可在曲库页手动指定来源。
+
 ### 停止
 
 ```powershell

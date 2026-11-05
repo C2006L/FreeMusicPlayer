@@ -199,6 +199,7 @@ onUnmounted(() => { requestId++; controller?.abort() })
             <span v-else> · 在线补充 {{ onlineTotal }} 首</span>
           </div>
         </div>
+        <p v-if="route.query.query" class="mb-3 text-[11px] leading-5 text-muted-foreground">默认搜索不含网易云 / QQ：没有登录态时多数只返回试听片段；需要时仍可手动指定这两个来源搜索。</p>
         <div v-if="route.query.query" class="mb-4 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
           <label for="playback-filter" class="max-sm:hidden">在线结果</label>
           <select id="playback-filter" v-model="playbackFilter" class="min-h-[44px] rounded border border-border bg-background px-3 py-2 text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary max-sm:w-full">
