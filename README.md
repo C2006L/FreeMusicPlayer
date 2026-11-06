@@ -226,13 +226,28 @@ AI 请求链路：
 
 登录使用邮箱和密码；注册、找回密码及变更邮箱需要一次性验证码。新密码使用 BCrypt，旧 MD5 账号成功登录后自动迁移。改密或找回密码会撤销旧会话。
 
-本地测试邮件使用 Mailpit，不会发往外部邮箱：
+本地测试邮件使用 Mailpit，不会发往外部邮箱（脚本会同时设置 `FMP_MAIL_ALLOW_LOCAL=true`）：
 
 ```powershell
 .\scripts\start-dev.ps1 -WithMail
 ```
 
-打开 `http://localhost:8025` 查看验证码。真实邮件服务使用 `SMTP_HOST`、`SMTP_PORT`、`SMTP_USERNAME`、`SMTP_PASSWORD`，并按供应商要求设置 `SMTP_AUTH`、`SMTP_SSL` 或 `SMTP_STARTTLS`。
+打开 `http://localhost:8025` 查看验证码。
+
+**要用真实邮箱收验证码**，必须在启动后端的终端里配置真实 SMTP 并重启（以 163 为例，`SMTP_PASSWORD` 填邮箱授权码而不是登录密码）：
+
+```powershell
+$env:SMTP_HOST = "smtp.163.com"
+$env:SMTP_PORT = "465"
+$env:SMTP_USERNAME = "你的邮箱@163.com"
+$env:SMTP_PASSWORD = "授权码"
+$env:SMTP_AUTH = "true"
+$env:SMTP_SSL = "true"
+```
+
+QQ 邮箱用 `smtp.qq.com:465`；587 端口改为 `SMTP_SSL=false`、`SMTP_STARTTLS=true`。启动日志会打印 `邮件服务目标 …（外部投递）`。
+
+未配置真实 SMTP 时，`/user/sendVerificationCode` 会直接返回“验证码未发出：当前邮件服务指向本机接收器 localhost:1025…”，不会再提示"发送成功"；SMTP 连接或认证失败会返回 `邮件发送失败：无法通过 SMTP host:port 投递…` 并写入后端日志。详见 [docs/部署.md](docs/部署.md#邮箱测试与真实-smtp)。
 
 JWT 密钥由脚本生成到 `.runtime/jwt-secret.txt`。IDE 启动时需自行设置 `VIBE_MUSIC_JWT_SECRET`。登录凭据保存在当前浏览器会话中。
 

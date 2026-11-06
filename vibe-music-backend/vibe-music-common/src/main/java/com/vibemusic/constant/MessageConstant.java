@@ -53,6 +53,13 @@ public class MessageConstant {
 
     public static final String EMAIL_SEND_SUCCESS = "邮件发送成功";
     public static final String EMAIL_SEND_FAILED = "邮件发送失败";
+    // 邮件只落到本机 Mailpit 时直接报错，避免"提示发送成功、外部邮箱收不到"
+    public static final String EMAIL_LOCAL_SINK_BLOCKED =
+            "验证码未发出：当前邮件服务指向本机接收器 %s，外部邮箱收不到。"
+                    + "请为后端配置真实 SMTP（SMTP_HOST、SMTP_PORT、SMTP_USERNAME、SMTP_PASSWORD、SMTP_AUTH=true）后重启；"
+                    + "仅本地调试可设置 FMP_MAIL_ALLOW_LOCAL=true 并在 Mailpit 中查看验证码";
+    public static final String EMAIL_SEND_FAILED_DETAIL =
+            "邮件发送失败：无法通过 SMTP %s 投递，请检查 SMTP_HOST、SMTP_PORT、SMTP_USERNAME、SMTP_PASSWORD、SMTP_AUTH 或网络连通性";
 
     public static final String USER_STATUS_INVALID = "用户状态无效";
     public static final String BANNER_STATUS_INVALID = "轮播图状态无效";

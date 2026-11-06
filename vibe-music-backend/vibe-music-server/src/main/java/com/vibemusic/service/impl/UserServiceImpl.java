@@ -95,10 +95,17 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             return Result.error(MessageConstant.VERIFICATION_CODE_TOO_FREQUENT);
         }
 
+        // 未配置真实 SMTP 时邮件只会落进本机 Mailpit，外部邮箱永远收不到：
+        // 这里直接返回明确原因，并把冷却键释放掉，便于配置好后立即重试。
+        if (!emailService.deliversToExternalMailbox()) {
+            stringRedisTemplate.delete(cooldownKey);
+            return Result.error(String.format(MessageConstant.EMAIL_LOCAL_SINK_BLOCKED, emailService.deliveryTarget()));
+        }
+
         String verificationCode = emailService.sendVerificationCodeEmail(normalizedEmail);
         if (verificationCode == null) {
             stringRedisTemplate.delete(cooldownKey);
-            return Result.error(MessageConstant.EMAIL_SEND_FAILED);
+            return Result.error(String.format(MessageConstant.EMAIL_SEND_FAILED_DETAIL, emailService.deliveryTarget()));
         }
 
         // 将验证码存储到Redis中，设置过期时间为5分钟

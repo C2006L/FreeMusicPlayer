@@ -131,3 +131,6 @@ vibe-music:
   online:
     provider-url: ${VIBE_MUSIC_PROVIDER_URL:http://127.0.0.1:3001}
     provider-public-url: ${VIBE_MUSIC_PROVIDER_PUBLIC_URL:http://localhost:18080/song}
+  mail:
+    # 仅当明确要往本机 Mailpit 投递时才设为 true，否则未配置真实 SMTP 时验证码接口直接报错。
+    allow-local-sink: ${FMP_MAIL_ALLOW_LOCAL:false}

@@ -195,6 +195,9 @@ if ($WithMinio) { Wait-Port 9000 }
 if ($WithMail) {
     $dockerExit = Invoke-Docker @('compose', '-f', $composeFile, '--profile', 'mail', 'up', '-d', 'mailpit')
     if ($dockerExit -ne 0) { throw 'Local test mailbox failed to start.' }
+    # 本机 Mailpit 只用于开发调试。默认不允许往本机接收器投递（验证码接口会直接报错），
+    # 显式加上 -WithMail 才放宽，验证码可在 http://localhost:8025 查看。
+    $env:FMP_MAIL_ALLOW_LOCAL = 'true'
 }
 
 $env:GO_MUSIC_API_URL = 'http://127.0.0.1:3002'
