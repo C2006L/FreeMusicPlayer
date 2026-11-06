@@ -8,7 +8,27 @@
     <meta name="description" content="FreeMusicPlayer 多来源桌面音乐播放器" />
     <meta name="author" content="FreeMusicPlayer" />
     <meta name="keywords" content="FreeMusicPlayer, music player, 音乐播放器" />
-    <meta name="theme-color" content="#0e0f12" />
+    <meta name="theme-color" content="#faf7f2" />
+    <script>
+      // 在首屏渲染前定色，跟随系统主题；用户手动切换过的主题（vueuse-color-scheme）优先。
+      (function () {
+        try {
+          var stored = localStorage.getItem('vueuse-color-scheme')
+          var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+          var dark = stored === 'dark' || (stored !== 'light' && prefersDark)
+          var root = document.documentElement
+          root.classList.toggle('dark', dark)
+          root.classList.toggle('light', !dark)
+          root.style.colorScheme = dark ? 'dark' : 'light'
+          var meta = document.querySelector('meta[name="theme-color"]')
+          if (meta) meta.setAttribute('content', dark ? '#0e0f12' : '#faf7f2')
+        } catch (e) {}
+      })()
+    </script>
+    <style>
+      html { background-color: #faf7f2; }
+      html.dark { background-color: #0e0f12; }
+    </style>
     <title>FreeMusicPlayer</title>
   </head>
   <body>

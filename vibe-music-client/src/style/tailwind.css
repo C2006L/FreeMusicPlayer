@@ -7,6 +7,10 @@
     --theme-bg-color: 36 29% 96% / 100%;
     --dm-background: 36 29% 96% / 96%;
 
+    /* 首屏 / 启动页配色，与 index.html 预置色保持一致 */
+    --splash-bg: #faf7f2;
+    --splash-fg: #1c1a17;
+
     --background: 38 33% 96%;
     --foreground: 30 12% 12%;
 
@@ -52,6 +56,9 @@
   .dark {
     --theme-bg-color: 225 13% 7% / 100%;
     --dm-background: 225 13% 7% / 97%;
+
+    --splash-bg: #0e0f12;
+    --splash-fg: #f2eee8;
 
     --background: 225 13% 7%;
     --foreground: 36 18% 94%;

@@ -23,10 +23,11 @@ const toggleMode = () => {
   toggleDark()
 }
 
-// 初始化时根据 store 设置图标
+// 以实际生效的主题为准同步 store（含跟随系统时的变化），再驱动图标
 watch(
-  () => theme.isDark,
+  isDark,
   (newValue) => {
+    theme.setDark(newValue)
     currentIcon.value = newValue
       ? 'mdi:weather-night'
       : 'material-symbols:wb-sunny-outline-rounded'

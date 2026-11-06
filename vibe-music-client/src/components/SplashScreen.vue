@@ -25,7 +25,7 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: #0e0f12;
+  background-color: var(--splash-bg);
   pointer-events: none;
   animation: splash-out 0.3s cubic-bezier(0.22, 0.61, 0.36, 1) 0.65s forwards;
 }
@@ -39,7 +39,7 @@ onMounted(() => {
   font-size: 44px;
   font-weight: 700;
   letter-spacing: -0.02em;
-  color: #f2eee8;
+  color: var(--splash-fg);
   animation: splash-rise 0.6s cubic-bezier(0.22, 0.61, 0.36, 1) 0.3s both;
 }
 
