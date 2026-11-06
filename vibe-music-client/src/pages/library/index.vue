@@ -68,7 +68,12 @@ const searchingOnline = ref(false)
 const loading = ref(false)
 const loadError = ref('')
 const sourceStates = ref<Record<string,string>>({})
-const sourceLabels:Record<string,string>={netease:'网易云',qq:'QQ音乐',kugou:'酷狗',kuwo:'酷我',migu:'咪咕',qianqian:'千千',jamendo:'Jamendo',bilibili:'B站'}
+const sourceLabels:Record<string,string>={kugou:'酷狗',kuwo:'酷我',migu:'咪咕',qianqian:'千千',jamendo:'Jamendo',bilibili:'B站',netease:'网易云',qq:'QQ音乐'}
+// 状态行按固定顺序渲染，保证网易云 / QQ 始终排在最后。
+const sourceOrder = ['kugou','kuwo','migu','qianqian','jamendo','bilibili','netease','qq']
+const orderedSourceStates = computed(() => Object.keys(sourceStates.value)
+  .sort((a, b) => (sourceOrder.indexOf(a) + 1 || 99) - (sourceOrder.indexOf(b) + 1 || 99))
+  .map(source => [source, sourceStates.value[source]] as const))
 let requestId = 0
 let controller: AbortController | undefined
 
@@ -186,11 +191,11 @@ onUnmounted(() => { requestId++; controller?.abort() })
 </script>
 
 <template>
-    <div class="flex h-full flex-1 flex-col overflow-hidden px-5 pb-4 pt-5 max-sm:px-4 max-sm:pt-4 md:px-8">
-        <div class="mb-5 flex flex-wrap items-end justify-between gap-2 border-b border-border pb-4">
+    <div class="flex h-full flex-1 flex-col overflow-hidden px-5 pb-4 pt-5 max-sm:px-4 max-sm:pb-2 max-sm:pt-2 md:px-8">
+        <div class="mb-5 flex flex-wrap items-end justify-between gap-2 border-b border-border pb-4 max-sm:mb-2 max-sm:pb-2">
           <div>
             <p class="mb-1 text-[10px] font-semibold tracking-[0.2em] text-primary">LIBRARY</p>
-            <h1 class="text-2xl font-semibold">{{ route.query.artist ? `${route.query.artist} · 相关歌曲` : route.query.query ? `“${route.query.query}” 的搜索结果` : '曲库' }}</h1>
+            <h1 class="text-2xl font-semibold max-sm:text-xl">{{ route.query.artist ? `${route.query.artist} · 相关歌曲` : route.query.query ? `“${route.query.query}” 的搜索结果` : '曲库' }}</h1>
             <p v-if="route.query.artist" class="mt-2 text-xs text-muted-foreground">已按平台与歌手名称筛选；同名歌手仍可能出现。</p>
           </div>
           <div v-if="route.query.query" class="text-xs text-muted-foreground">
@@ -199,8 +204,7 @@ onUnmounted(() => { requestId++; controller?.abort() })
             <span v-else> · 在线补充 {{ onlineTotal }} 首</span>
           </div>
         </div>
-        <p v-if="route.query.query" class="mb-3 text-[11px] leading-5 text-muted-foreground">默认搜索不含网易云 / QQ：没有登录态时多数只返回试听片段；需要时仍可手动指定这两个来源搜索。</p>
-        <div v-if="route.query.query" class="mb-4 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+        <div v-if="route.query.query" class="mb-4 flex flex-wrap items-center gap-3 text-xs text-muted-foreground max-sm:mb-1 max-sm:gap-2">
           <label for="playback-filter" class="max-sm:hidden">在线结果</label>
           <select id="playback-filter" v-model="playbackFilter" class="min-h-[44px] rounded border border-border bg-background px-3 py-2 text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary max-sm:w-full">
             <option value="prefer">按本次播放状态排序</option>
@@ -208,20 +212,20 @@ onUnmounted(() => { requestId++; controller?.abort() })
             <option value="no-preview">隐藏已知试听与失败</option>
             <option value="verified">仅本次已完整播完</option>
           </select>
-          <span v-if="playbackFilter === 'no-preview'" class="max-sm:w-full max-sm:text-[11px] max-sm:leading-5">已隐藏判定为试听或不可播放的在线结果；完整性未知的条目仍会显示，点击或悬停后可补探并自动移除。</span>
-          <span v-else class="max-sm:w-full max-sm:text-[11px] max-sm:leading-5">{{ playbackFilter === 'verified' ? '仅显示本次确实完整播完的在线结果，本地曲库不受影响。' : '完整性未知不等于无法播放；时长匹配表示音频时长一致。' }}</span>
+          <span v-if="playbackFilter === 'no-preview'" class="max-sm:w-full max-sm:text-[10px] max-sm:leading-4">已隐藏判定为试听或不可播放的在线结果；完整性未知的条目仍会显示，点击或悬停后可补探并自动移除。</span>
+          <span v-else class="max-sm:w-full max-sm:text-[10px] max-sm:leading-4">{{ playbackFilter === 'verified' ? '仅显示本次确实完整播完的在线结果，本地曲库不受影响。' : '完整性未知不等于无法播放；时长匹配表示音频时长一致。' }}</span>
           <button v-if="playbackFilter === 'prefer' && (hiddenUnavailableCount || showUnavailable)" type="button"
             class="min-h-[44px] rounded border border-border bg-background px-3 py-2 text-foreground transition hover:bg-muted max-sm:w-full"
             @click="showUnavailable = !showUnavailable">
             {{ showUnavailable ? '收起暂不可播结果' : `展开 ${hiddenUnavailableCount} 条暂不可播结果` }}
           </button>
         </div>
-        <div v-if="searchingOnline || Object.keys(sourceStates).length" class="mb-3 flex flex-wrap gap-3 text-[11px] text-muted-foreground" role="status"><span v-for="(status,source) in sourceStates" :key="source" :title="status==='检索失败'?'该平台本次请求失败或超时，不影响其他平台，也不表示所有歌曲不可播放。':status==='无结果'?'该平台本次未返回匹配歌曲。':''">{{ sourceLabels[source] || source }} · {{ status }}</span></div>
+        <div v-if="searchingOnline || Object.keys(sourceStates).length" class="mb-3 flex flex-wrap gap-3 text-[11px] text-muted-foreground max-sm:mb-1 max-sm:gap-x-2 max-sm:text-[10px] max-sm:leading-4" role="status"><span v-for="([source,status]) in orderedSourceStates" :key="source" :title="status==='检索失败'?'该平台本次请求失败或超时，不影响其他平台，也不表示所有歌曲不可播放。':status==='无结果'?'该平台本次未返回匹配歌曲。':''">{{ sourceLabels[source] || source }} · {{ status }}</span></div>
         <div class="min-h-0 flex-1 overflow-y-auto">
           <Table :data="tableData?.items" :loading="loading" :error="loadError"
             :empty-text="searchingOnline ? '正在等待其余音源结果…' : playbackFilter === 'verified' && route.query.query ? '还没有完整播放验证过的结果，可切换到全部结果' : playbackFilter === 'no-preview' && route.query.query ? '在线结果均为已知试听或不可播放，可切换到全部结果查看' : route.query.query ? '没有找到匹配的歌曲' : '曲库还是空的'" @retry="getSongs" />
         </div>
-        <nav class="mx-auto flex w-full justify-center mt-3">
+        <nav class="mx-auto flex w-full justify-center mt-3 max-sm:mt-1">
             <el-pagination v-model:page-size="pageSize" v-model:currentPage="currentPage" v-bind="state" :pager-count="isPhone ? 5 : 7"
                 @size-change="handleSizeChange" @current-change="handleCurrentChange" class="mb-3" />
         </nav>

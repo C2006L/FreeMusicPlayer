@@ -33,6 +33,25 @@ const statusLabel = (song: Song) => {
   if (availability === 'full') return '已验证完整'
   return song.online || song.source ? '完整性未知' : ''
 }
+// 紧凑布局下用色点 + 短文案，保持状态可辨且不占宽。
+const statusShort = (song: Song) => {
+  const label = statusLabel(song)
+  if (label === '已验证完整') return '完整'
+  if (label === '试听片段') return '试听'
+  if (label === '暂不可播') return '不可播'
+  if (label === '权益待验证') return '待验证'
+  if (label === '完整性未知') return '未知'
+  return label
+}
+const statusTone = (song: Song) => {
+  const label = statusLabel(song)
+  if (label === '已验证完整') return 'is-full'
+  if (label === '试听片段') return 'is-preview'
+  if (label === '暂不可播') return 'is-unavailable'
+  if (label === '权益待验证') return 'is-restricted'
+  if (label === '完整性未知') return 'is-unknown'
+  return ''
+}
 // 悬停或聚焦时才探测该条，替代搜索时批量预探，避免拖慢搜索与浪费上游请求。
 const requestProbe = (song: Song) => {
   if (!song.online && (!song.source || song.source === 'local')) return
@@ -155,8 +174,15 @@ const isCurrent = (song: Song) => {
             <span class="cover-overlay"><PlayingIndicator v-if="isCurrent(song)" :paused="!isPlaying" /><icon-tabler:player-play-filled v-else /></span>
           </button>
           <div class="min-w-0">
-            <div class="flex min-w-0 items-center gap-2"><strong class="truncate text-sm font-medium" :title="song.songName">{{ song.songName }}</strong><span v-if="song.online || song.source" class="source-badge">{{ song.sourceName || song.source }}</span><span v-if="statusLabel(song)" class="availability-badge" :class="{'is-unknown':statusLabel(song)==='完整性未知'}" title="完整性未知不等于播放失败；没有标称时长或尚未播完时无法确认整曲。记录在本次页面内15分钟有效。">{{ statusLabel(song) }}</span></div>
-            <span class="block truncate text-xs text-muted-foreground" :title="song.artistName">{{ song.artistName || '未知歌手' }}</span>
+            <div class="song-title-line">
+              <strong class="truncate text-sm font-medium" :title="song.songName">{{ song.songName }}</strong>
+              <span v-if="song.online || song.source" class="source-badge">{{ song.sourceName || song.source }}</span>
+              <span v-if="statusLabel(song)" class="availability-badge" :class="statusTone(song)" :title="statusLabel(song) === '完整性未知' ? '完整性未知不等于播放失败；没有标称时长或尚未播完时无法确认整曲。记录在本次页面内15分钟有效。' : undefined"><i class="status-dot" aria-hidden="true" /><span class="status-full">{{ statusLabel(song) }}</span><span class="status-short">{{ statusShort(song) }}</span></span>
+            </div>
+            <span class="song-subline">
+              <span class="song-artist truncate" :title="song.artistName">{{ song.artistName || '未知歌手' }}</span>
+              <span class="song-inline-duration tabular-nums">{{ Number(song.duration) > 0 ? formatTime(Number(song.duration)) : '--:--' }}</span>
+            </span>
           </div>
         </div>
         <span class="song-album truncate" :title="song.album">{{ song.album || '未知专辑' }}</span>
@@ -197,21 +223,39 @@ const isCurrent = (song: Song) => {
 .song-state h3 { color:hsl(var(--foreground)); font-size:15px; font-weight:600; }.song-state p { max-width:380px; font-size:12px; }
 .state-action { margin-top:8px; border:1px solid hsl(var(--border)); border-radius:6px; padding:7px 14px; color:hsl(var(--foreground)); font-size:12px; }
 .song-skeleton { display:grid; min-height:60px; grid-template-columns:44px 1fr; align-items:center; gap:12px; padding-inline:12px; border-bottom:1px solid hsl(var(--border)/.45); }
+.song-title-line { display:flex; min-width:0; align-items:center; gap:6px; }
+.song-title-line strong { min-width:0; }
+.song-subline { display:flex; min-width:0; align-items:baseline; gap:8px; color:hsl(var(--muted-foreground)); font-size:12px; }
+.song-artist { min-width:0; }
+.song-inline-duration,.status-dot,.status-short { display:none; }
+.availability-badge.is-unknown { color:hsl(var(--muted-foreground));background:hsl(var(--muted)/.5); }
 @media(max-width:840px){.song-list__header,.song-row{grid-template-columns:minmax(220px,1fr) 54px 108px}.song-album,.song-list__header span:nth-child(2){display:none}}
 @media(max-width:767px){
   .song-list__header{display:none}
-  .song-row{display:flex;min-height:68px;gap:8px;padding:8px 6px}
+  .song-row{display:flex;min-height:56px;gap:8px;padding:5px 4px}
   .song-row:active{background:hsl(var(--muted)/.54)}
-  .song-primary{flex:1 1 auto;grid-template-columns:44px minmax(0,1fr);gap:10px}
+  .song-primary{flex:1 1 auto;grid-template-columns:44px minmax(0,1fr);gap:9px}
   .song-album,.song-duration{display:none}
   .song-actions{flex:none;gap:0}
   .row-action{width:44px;height:44px}
   .secondary-action{opacity:1}
-  .song-row .song-primary .flex{flex-wrap:wrap;row-gap:2px}
-  .song-row .song-primary strong{flex:1 1 100%}
+  .song-actions .secondary-action[aria-label="更多操作"]{display:none}
+  .song-row .song-title-line{flex-wrap:nowrap;gap:5px}
+  .song-row .song-title-line strong{flex:1 1 auto;min-width:0}
+  .song-row .source-badge,.song-row .availability-badge{flex:none}
+  .song-row .availability-badge{display:inline-flex;align-items:center;gap:3px;padding:1px 4px;line-height:14px}
+  .status-full{display:none}
+  .status-short{display:inline}
+  .status-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:currentColor}
+  .availability-badge.is-full{color:#2f8f67;background:rgb(47 143 103/.12)}
+  .availability-badge.is-preview{color:#b8741a;background:rgb(184 116 26/.14)}
+  .availability-badge.is-restricted{color:#bf551d;background:rgb(191 85 29/.12)}
+  .availability-badge.is-unavailable{color:hsl(var(--muted-foreground));background:hsl(var(--muted))}
+  .availability-badge.is-unknown{color:hsl(var(--muted-foreground));background:hsl(var(--muted)/.5)}
+  .song-subline{font-size:11px;line-height:14px;margin-top:1px;gap:6px}
+  .song-inline-duration{display:inline;flex:none;font-size:11px;color:hsl(var(--muted-foreground))}
   .song-row .cover-overlay{opacity:0}
   .is-current .cover-overlay{opacity:1}
 }
 @media(max-width:560px){.song-list__header{display:none}.song-row{grid-template-columns:minmax(0,1fr) 90px;gap:8px}.song-duration{display:none}}
-.availability-badge.is-unknown { color:hsl(var(--muted-foreground));background:hsl(var(--muted)/.5); }
 </style>

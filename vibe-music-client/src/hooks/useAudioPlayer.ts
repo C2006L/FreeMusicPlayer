@@ -93,8 +93,8 @@ export const AudioPlayer = () => {
   watch(()=>user.userInfo.userId,()=>{reportSession=createUuid();reportOffset=playedSeconds;lastReported=0})
 
   const onlineSources = [
-    'netease', 'qq', 'kugou', 'kuwo', 'migu', 'qianqian',
-    'jamendo', 'bilibili', 'fivesing', 'joox', 'baidu',
+    'kugou', 'kuwo', 'migu', 'qianqian', 'jamendo',
+    'bilibili', 'fivesing', 'joox', 'baidu', 'netease', 'qq',
   ]
 
   const normalizeText = (value: string) =>

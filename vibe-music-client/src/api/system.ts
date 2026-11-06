@@ -147,15 +147,18 @@ export const searchOnlineProgressive = async (
   signal: AbortSignal,
   update: (songs: any[], states: Record<string, string>) => void
 ) => {
-  // 无登录态时网易云 / QQ 多数只返回试听片段，默认不纳入聚合搜索；仍可显式传入恢复。
-  const selected = sources || [
+  // 音源顺序固定为「其余音源 → 网易云 → QQ」；后两个默认不参与，显式传入即可恢复。
+  const allSources = [
     'kugou',
     'kuwo',
     'migu',
     'qianqian',
     'jamendo',
     'bilibili',
+    'netease',
+    'qq',
   ]
+  const selected = sources || allSources.filter((source) => source !== 'netease' && source !== 'qq')
   const states: Record<string, string> = Object.fromEntries(
     selected.map((source) => [source, '搜索中'])
   )
