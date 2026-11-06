@@ -11,6 +11,7 @@ import { resolveApiBase } from '@/utils/apiBase'
 import { createUuid } from '@/utils/uuid'
 import { usePlayHistory } from '@/stores/modules/playHistory'
 import { UserStore } from '@/stores/modules/user'
+import { getVisitorId } from '@/utils/visitor'
 interface AudioPlayer {
   isBuffering: Ref<boolean>
   isPlaying: Ref<boolean>
@@ -105,6 +106,19 @@ export const AudioPlayer = () => {
 
   const isOnlineTrack = (track: trackModel) =>
     Boolean(track.online || (track.source && track.source !== 'local') || String(track.id).startsWith('online:'))
+
+  // <audio> 无法自定义请求头，匿名访客用查询参数携带标识；登录用户不写匿名事件。
+  const guestAwareStreamUrl = (url: string) => {
+    if (!url || !url.includes('/song/streamOnline')) return url
+    if (UserStore().userInfo?.token) return url
+    try {
+      const parsed = new URL(url, window.location.origin)
+      parsed.searchParams.set('visitor', getVisitorId())
+      return parsed.toString()
+    } catch {
+      return url
+    }
+  }
 
   //   // 用于追踪当前歌词索引
   //   const currentLyricIndex = ref(0)
@@ -285,7 +299,7 @@ export const AudioPlayer = () => {
       duration.value = Number.isFinite(expectedDuration) && expectedDuration > 0
         ? expectedDuration
         : 0
-      audioElement.value.src = currentTrack.value.url
+      audioElement.value.src = guestAwareStreamUrl(currentTrack.value.url)
       loadedTrack = track
       audioElement.value.load()
     }

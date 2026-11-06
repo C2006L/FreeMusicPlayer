@@ -63,5 +63,13 @@ public class SchemaMigrationRunner implements ApplicationRunner {
                 db.update("INSERT INTO fmp_schema_history(version) VALUES ('20261025-workspace')");
             } catch (java.io.IOException e) { throw new IllegalStateException("Workspace migration missing", e); }
         }
+        if (db.queryForObject("SELECT COUNT(*) FROM fmp_schema_history WHERE version='20261106-visitor'", Integer.class) == 0) {
+            try {
+                String sql = new org.springframework.core.io.ClassPathResource("db/20261106-visitor.sql")
+                        .getContentAsString(java.nio.charset.StandardCharsets.UTF_8);
+                for (String statement : sql.split(";")) if (!statement.isBlank()) db.execute(statement);
+                db.update("INSERT INTO fmp_schema_history(version) VALUES ('20261106-visitor')");
+            } catch (java.io.IOException e) { throw new IllegalStateException("Visitor migration missing", e); }
+        }
     }
 }

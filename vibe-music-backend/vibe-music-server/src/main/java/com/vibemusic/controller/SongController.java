@@ -2,6 +2,7 @@ package com.vibemusic.controller;
 
 
 import com.vibemusic.model.dto.OnlineSongImportDTO;
+import com.vibemusic.analytics.AnonymousTrafficService;
 import com.vibemusic.model.dto.SongDTO;
 import com.vibemusic.model.vo.SongDetailVO;
 import com.vibemusic.model.vo.SongVO;
@@ -37,6 +38,9 @@ public class SongController {
 
     @Autowired
     private OnlineMusicService onlineMusicService;
+
+    @Autowired
+    private AnonymousTrafficService anonymousTrafficService;
 
     /**
      * 获取所有歌曲
@@ -79,9 +83,13 @@ public class SongController {
     public Result<List<OnlineSongVO>> searchOnline(
             @RequestParam String keyword,
             @RequestParam(required = false) List<String> sources,
-            @RequestParam(defaultValue = "20") int limit) {
+            @RequestParam(defaultValue = "20") int limit,
+            @RequestHeader(value = "X-Visitor-Id", required = false) String visitorId) {
         if (keyword.isBlank() || keyword.length() > 100) {
             return Result.error("搜索关键词长度应为 1-100 个字符");
+        }
+        if (AnonymousTrafficService.isAnonymous()) {
+            anonymousTrafficService.recordSearch(visitorId, keyword);
         }
         try {
             return Result.success(onlineMusicService.search(keyword, sources, limit));
@@ -104,11 +112,15 @@ public class SongController {
             @RequestParam(required = false) String duration,
             @RequestParam(required = false) String cover,
             @RequestParam(required = false) String extra,
-            @RequestParam(required = false) String engine) {
+            @RequestParam(required = false) String engine,
+            @RequestHeader(value = "X-Visitor-Id", required = false) String visitorId) {
         Long seconds = null;
         if (duration != null && !duration.isBlank()) {
             try { seconds = Long.parseLong(duration.trim()); }
             catch (NumberFormatException ignored) { return Result.error("无效的时长"); }
+        }
+        if (AnonymousTrafficService.isAnonymous()) {
+            anonymousTrafficService.recordProbe(visitorId, source, id);
         }
         try {
             // 用显式构造器：Result.success(String) 重载会把等级写进 message，data 将为 null。
@@ -149,8 +161,13 @@ public class SongController {
             @RequestParam(required = false) String cover,
             @RequestParam(required = false) String extra,
             @RequestParam(required = false) String engine,
+            @RequestParam(value = "visitor", required = false) String visitor,
+            @RequestHeader(value = "X-Visitor-Id", required = false) String visitorId,
             @RequestHeader(value = "Range", required = false) String range,
             HttpServletResponse response) throws IOException {
+        if (AnonymousTrafficService.isAnonymous()) {
+            anonymousTrafficService.recordStream(visitor != null ? visitor : visitorId, source, id);
+        }
         onlineMusicService.proxyResource("stream", source, id, range,
                 resourceMetadata(name, artist, album, duration, cover, extra, engine), response);
     }

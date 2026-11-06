@@ -9,6 +9,7 @@ import 'nprogress/nprogress.css'
 import { UserStore } from '@/stores/modules/user'
 import { ElMessage } from 'element-plus'
 import { resolveApiBase } from '@/utils/apiBase'
+import { getVisitorId } from '@/utils/visitor'
 declare module 'axios' {
   interface AxiosRequestConfig {
     quiet?: boolean
@@ -31,6 +32,12 @@ instance.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     // 开启进度条
     NProgress.start()
+
+    // 每次请求都带上持久匿名标识，后端只在未登录时落库。
+    if (!config.headers) {
+      config.headers = {} as AxiosRequestHeaders
+    }
+    config.headers['X-Visitor-Id'] = getVisitorId()
 
     // 只有登录请求不需要添加token
     if (config.url?.includes('/user/login')) {

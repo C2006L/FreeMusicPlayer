@@ -5,17 +5,21 @@ const data = ref<any>(null),
   loading = ref(false),
   error = ref("");
 const sources = ref<any>(null);
+const visitors = ref<any>(null);
+const eventLabels: Record<string, string> = { search: "搜索", stream: "播放", probe: "探测" };
 const refresh = async () => {
   loading.value = true;
   error.value = "";
   try {
-    const [r, s] = await Promise.all([
+    const [r, s, v] = await Promise.all([
       http.request<any>("get", "/admin/ops"),
-      http.request<any>("get", "/admin/ops/sources")
+      http.request<any>("get", "/admin/ops/sources"),
+      http.request<any>("get", "/admin/ops/visitors")
     ]);
     if (r.code !== 0) throw new Error(r.message);
     data.value = r.data;
     sources.value = s.data;
+    visitors.value = v.data;
   } catch (e: any) {
     error.value = e.message || "无法获取诊断信息";
   } finally {
@@ -111,6 +115,40 @@ onMounted(refresh);
           prop="meanMs"
           label="平均 ms" /><el-table-column prop="maxMs" label="窗口最大 ms"
       /></el-table>
+      <h2 class="text-lg font-medium">匿名访客（近 {{ visitors?.windowDays || 7 }} 天）</h2>
+      <div v-if="visitors && visitors.events > 0">
+        <p>
+          去重访客 {{ visitors.uniqueVisitors }} 人 · 今日 {{ visitors.todayVisitors }} 人 ·
+          事件 {{ visitors.events }} 条（搜索 {{ visitors.searches }} 次）
+        </p>
+        <div class="mt-4 grid gap-6 lg:grid-cols-2">
+          <div>
+            <h3 class="mb-2 font-medium">搜索关键词 Top</h3>
+            <el-table :data="visitors.topKeywords" max-height="320"
+              ><el-table-column prop="keyword" label="关键词" min-width="180" /><el-table-column
+                prop="count" label="次数" width="90"
+            /></el-table>
+          </div>
+          <div>
+            <h3 class="mb-2 font-medium">播放 / 探测来源分布</h3>
+            <el-table :data="visitors.sources" max-height="320"
+              ><el-table-column prop="source" label="来源" min-width="180" /><el-table-column
+                prop="count" label="事件数" width="90"
+            /></el-table>
+          </div>
+        </div>
+        <h3 class="mb-2 mt-4 font-medium">最近匿名流水</h3>
+        <el-table :data="visitors.recent" max-height="340"
+          ><el-table-column prop="visitor_id" label="访客" min-width="220" /><el-table-column
+            label="行为" width="90"
+            ><template #default="{ row }">{{ eventLabels[row.event] || row.event }}</template></el-table-column
+          ><el-table-column prop="keyword" label="关键词" min-width="150" /><el-table-column
+            prop="source" label="来源" min-width="150" /><el-table-column
+            prop="song_key" label="歌曲" min-width="180" /><el-table-column
+            prop="created_at" label="时间" min-width="190"
+        /></el-table>
+      </div>
+      <p v-else class="text-sm text-gray-500">暂无匿名访问记录。</p>
       <h2 class="text-lg font-medium">操作审计</h2>
       <el-table :data="data.audit" max-height="340"
         ><el-table-column prop="user_id" label="用户" /><el-table-column

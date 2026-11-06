@@ -7,6 +7,8 @@ public class PathConstant {
     public static final String SONG_LIST_PATH = "/song/getAllSongs";
     public static final String SONG_DETAIL_PATH = "/song/getSongDetail/**";
     public static final String SONG_ONLINE_SEARCH_PATH = "/song/searchOnline";
+    public static final String SONG_ONLINE_STREAM_PATH = "/song/streamOnline";
+    public static final String SONG_ONLINE_PROBE_PATH = "/song/probeOnline";
     public static final String AGENT_PATH = "/agent/**";
 
 }
