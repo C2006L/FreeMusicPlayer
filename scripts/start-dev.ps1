@@ -4,7 +4,9 @@ param(
     [switch]$WithMail,
     [switch]$BackendOnly,
     # Admin UI listens on 127.0.0.1 by default; enable only for LAN demos.
-    [switch]$ExposeAdmin
+    [switch]$ExposeAdmin,
+    # Start two cloudflared quick tunnels and point the client/API/CORS at them.
+    [switch]$Tunnel
 )
 
 $ErrorActionPreference = 'Stop'
@@ -84,23 +86,75 @@ function Start-ManagedProcess(
     Write-Host "Started $Name (PID $($process.Id))."
 }
 
+function Stop-ManagedProcess([string]$Name) {
+    $pidFile = Join-Path $pidRoot "$Name.pid"
+    if (-not (Test-Path $pidFile)) { return }
+    $processId = [int](Get-Content $pidFile -Raw)
+    $existing = Get-CimInstance Win32_Process -Filter "ProcessId=$processId" -ErrorAction SilentlyContinue
+    if ($existing -and $existing.CommandLine -like '*vibe-music*') {
+        Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+        Write-Host "Stopped $Name (PID $processId) to apply new public URLs."
+        Start-Sleep -Milliseconds 800
+    }
+    Remove-Item $pidFile -ErrorAction SilentlyContinue
+}
+
+if ($Tunnel) {
+    # Tunnels are started first so their random public URLs can be applied to
+    # the client bundle, the backend media URLs and the CORS allow-list.
+    & (Join-Path $PSScriptRoot 'tunnel-dev.ps1')
+    $tunnelEnv = Join-Path $runtimeRoot 'tunnel.env'
+    if (-not (Test-Path $tunnelEnv)) {
+        throw 'Tunnel URLs were not written to .runtime/tunnel.env.'
+    }
+    Get-Content $tunnelEnv | ForEach-Object {
+        if ($_ -match '^([A-Z0-9_]+)=(\S+)$') {
+            Set-Item -Path "env:$($matches[1])" -Value $matches[2]
+        }
+    }
+    # The admin console is intentionally not exposed publicly.
+    $WithoutAdmin = $true
+    Stop-ManagedProcess 'backend'
+    Stop-ManagedProcess 'client'
+    Stop-ManagedProcess 'admin'
+    $releaseDeadline = (Get-Date).AddSeconds(15)
+    while ((Get-NetTCPConnection -LocalPort $backendPort -State Listen -ErrorAction SilentlyContinue) -and (Get-Date) -lt $releaseDeadline) {
+        Start-Sleep -Milliseconds 500
+    }
+}
+
 if (-not $BackendOnly) {
+# docker compose writes progress to stderr. With ErrorActionPreference 'Stop'
+# PowerShell turns that into a terminating NativeCommandError, which aborts
+# this script when it runs detached or with redirected output. Run docker with
+# 'Continue' and judge success by exit code only.
+function Invoke-Docker([string[]]$DockerArguments) {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & docker @DockerArguments 2>&1 | ForEach-Object { Write-Host $_ }
+        return $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+}
+$composeFile = Join-Path $projectRoot 'compose.dev.yml'
 if ($WithMinio) {
     Write-Host 'Starting MySQL, Redis and optional MinIO ...'
-    docker compose -f (Join-Path $projectRoot 'compose.dev.yml') --profile media up -d
+    $dockerExit = Invoke-Docker @('compose', '-f', $composeFile, '--profile', 'media', 'up', '-d')
 } else {
     Write-Host 'Starting MySQL and Redis (MinIO disabled) ...'
-    docker compose -f (Join-Path $projectRoot 'compose.dev.yml') --profile media stop minio minio-init 2>$null
-    docker compose -f (Join-Path $projectRoot 'compose.dev.yml') up -d mysql redis go-music-api
+    Invoke-Docker @('compose', '-f', $composeFile, '--profile', 'media', 'stop', 'minio', 'minio-init') | Out-Null
+    $dockerExit = Invoke-Docker @('compose', '-f', $composeFile, 'up', '-d', 'mysql', 'redis', 'go-music-api')
 }
-if ($LASTEXITCODE -ne 0) { throw 'Docker infrastructure failed to start.' }
+if ($dockerExit -ne 0) { throw 'Docker infrastructure failed to start.' }
 Wait-Port 13306
 Wait-Port 6379
 Wait-Port 3002 120
 if ($WithMinio) { Wait-Port 9000 }
 if ($WithMail) {
-    docker compose -f (Join-Path $projectRoot 'compose.dev.yml') --profile mail up -d mailpit
-    if ($LASTEXITCODE -ne 0) { throw 'Local test mailbox failed to start.' }
+    $dockerExit = Invoke-Docker @('compose', '-f', $composeFile, '--profile', 'mail', 'up', '-d', 'mailpit')
+    if ($dockerExit -ne 0) { throw 'Local test mailbox failed to start.' }
 }
 
 $env:GO_MUSIC_API_URL = 'http://127.0.0.1:3002'
@@ -157,6 +211,12 @@ if (-not $WithoutAdmin) {
 
 Write-Host ''
 Write-Host 'FreeMusicPlayer is ready:' -ForegroundColor Green
+if ($Tunnel) {
+    Write-Host "  Public client: $env:FMP_TUNNEL_CLIENT"
+    Write-Host "  Public API:    $env:FMP_TUNNEL_API/song"
+    Write-Host '  Admin console stays local only (not tunnelled).'
+    Write-Host '  Quit demo:  .\scripts\tunnel-dev.ps1 -Stop'
+}
 Write-Host '  User client:  http://localhost:8090'
 if (-not $WithoutAdmin) { Write-Host '  Admin client: http://localhost:8089' }
 Write-Host "  Backend API:  http://localhost:$backendPort"
