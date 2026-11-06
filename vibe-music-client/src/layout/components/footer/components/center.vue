@@ -36,6 +36,14 @@ const {
   previewSeek,
 } = useAudioPlayer()
 
+// 点击播放后到真正出音之间存在空档：用立即可见的加载反馈填补。
+const loadingPlayback = computed(
+  () =>
+    isBuffering.value ||
+    currentTrack.value.playbackStatus === 'switching' ||
+    (playbackRequested.value && !isPlaying.value)
+)
+
 // 获取当前播放歌曲的喜欢状态
 const currentSongLikeStatus = computed(() => {
   const currentTrack = audioStore.trackList[audioStore.currentSongIndex]
@@ -168,14 +176,17 @@ const handleLike = async () => {
       <button
         @click="togglePlayPause"
         class="play-button"
+        :class="{ 'is-loading': loadingPlayback }"
         :aria-label="playbackRequested ? '暂停' : '播放'"
+        :aria-busy="loadingPlayback"
       >
-        <Icon
-          :icon="
-            playbackRequested ? 'ic:round-pause-circle' : 'material-symbols:play-circle'
-          "
-          class="text-3xl"
-        />
+        <span class="play-state" :data-active="!playbackRequested">
+          <Icon icon="material-symbols:play-circle" class="text-3xl" />
+        </span>
+        <span class="play-state" :data-active="playbackRequested">
+          <Icon icon="ic:round-pause-circle" class="text-3xl" />
+        </span>
+        <span v-if="loadingPlayback" class="play-spinner" aria-hidden="true" />
       </button>
       <button
         @click="nextTrack"
@@ -234,8 +245,16 @@ const handleLike = async () => {
 .transport-button { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 50%; color: hsl(var(--muted-foreground)); transition: color .15s ease, background .15s ease, transform .15s ease; }
 .transport-button:hover { color: hsl(var(--foreground)); background: hsl(var(--muted)); }
 .transport-button:active { transform: scale(.94); }
-.play-button { display: grid; width: 40px; height: 40px; place-items: center; border-radius: 50%; color: #111216; background: var(--primary); transition: filter .15s ease, transform .15s ease; }
-.play-button:hover { filter: brightness(1.08); transform: scale(1.03); }
+.play-button { position: relative; display: grid; width: 40px; height: 40px; overflow: hidden; place-items: center; border-radius: 50%; color: #111216; background: var(--primary); box-shadow: 0 4px 14px rgb(239 111 82 / .18); transition: filter .18s ease, transform .18s cubic-bezier(.22,.61,.36,1), box-shadow .18s ease; }
+.play-button:hover { filter: brightness(1.07); transform: scale(1.06); box-shadow: 0 7px 18px rgb(239 111 82 / .26); }
+.play-button:active { filter: brightness(.96); transform: scale(.95); transition-duration: .09s; }
+.play-button:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+/* 播放/暂停图标交叉淡入 + 轻微缩放，避免瞬间跳变 */
+.play-state { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; transform: scale(.86); transition: opacity .16s ease, transform .24s cubic-bezier(.22,.61,.36,1); pointer-events: none; }
+.play-state[data-active='true'] { opacity: 1; transform: scale(1); }
+.play-button.is-loading .play-state { opacity: .4; }
+.play-spinner { position: absolute; width: 18px; height: 18px; border: 2px solid rgb(17 18 22 / .22); border-top-color: #111216; border-radius: 50%; animation: play-spin .75s linear infinite; }
+@keyframes play-spin { to { transform: rotate(360deg); } }
 .favorite-button { margin-left: 4px; }
 .progress-row { display: flex; min-width: 0; align-items: center; gap: 10px; }
 .time-label { width: 38px; flex: none; color: hsl(var(--muted-foreground)); font-size: 10px; font-variant-numeric: tabular-nums; text-align: center; }

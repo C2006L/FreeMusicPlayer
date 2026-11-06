@@ -460,10 +460,15 @@ progress {
 progress::-webkit-progress-bar { background: hsl(var(--border)); }
 progress::-webkit-progress-value { background: var(--primary); }
 progress::-moz-progress-bar { background: var(--primary); }
-button:focus-visible,
-input:focus-visible {
+button:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
+}
+/* 原生输入框只给一层细边框 + 轻光晕，避免和页面其它输入框出现粗细不一的描边 */
+input:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgb(239 111 82 / 0.12);
 }
 @media (max-width: 640px) {
   .workspace-page {

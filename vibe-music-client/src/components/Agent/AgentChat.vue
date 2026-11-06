@@ -331,7 +331,7 @@ const newConversation = async () => {
           <input v-model="completeOnly" type="checkbox" :disabled="streaming || cancelling" /> 仅服务端已验证完整的在线资源
         </label>
         <div
-          class="flex items-center gap-2 bg-card border border-border rounded-xl px-3 py-1.5 focus-within:ring-2 focus-within:ring-primary/50 transition-all duration-300"
+          class="flex items-center gap-2 bg-card border border-border rounded-xl px-3 py-1.5 focus-within:border-[rgba(239,111,82,.55)] focus-within:ring-1 focus-within:ring-[rgba(239,111,82,.35)] transition-all duration-300"
         >
           <input
             v-model="input"

@@ -84,11 +84,17 @@ async function load(force = false, song?: Song) {
         notice.value = `${error.value || '本次没有取得新歌词。'}已保留原有歌词。`; error.value = ''
       }
       loading.value = false
+      scheduleFollow()
     }
   }
 }
 watch(() => [key.value, currentTrack.value.lyric], () => { void load() }, { immediate: true })
-watch(offset, () => { if (!loading.value) void persist() })
+watch(offset, () => { if (!loading.value) { void persist(); if (document.value.synced) { following.value = true; scheduleFollow() } } })
+// 拖动进度条、外部 seek 会产生明显的时间跳跃；此时重新接管自动跟随。
+watch(currentTime, (value, previous) => {
+  if (!document.value.synced || loading.value || previous <= 0) return
+  if (Math.abs(value - previous) > 1.5) { following.value = true; scheduleFollow() }
+})
 async function searchOtherSources() {
   const query = `${currentTrack.value.title || ''} ${currentTrack.value.artist || ''}`.trim()
   if (!query || query.length > 100) { notice.value = '请先在曲库中定位合集里的具体单曲，再查找歌词。'; return }
@@ -179,14 +185,20 @@ async function translate() {
 async function followCurrent() {
   await nextTick()
   if (!following.value) return
-  const area = scrollArea.value, target = area?.querySelector<HTMLElement>('[data-active="true"]')
-  if (target && area) area.scrollTo({ top: target.offsetTop - area.clientHeight / 2 + target.offsetHeight / 2, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+  const area = scrollArea.value, target = area?.querySelector<HTMLElement>('.lyric-line[data-active="true"]')
+  if (!target || !area) return
+  const top = target.offsetTop - area.clientHeight / 2 + target.offsetHeight / 2
+  // 已经在中心附近时不重复启动平滑滚动，避免逐字推进时的抖动。
+  if (Math.abs(top - area.scrollTop) < 24) return
+  area.scrollTo({ top, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
 }
-watch([activeIndex, showRoma, showTranslation, showWords], () => { if (following.value) void followCurrent() })
+let followFrame = 0
+const scheduleFollow = () => { cancelAnimationFrame(followFrame); followFrame = requestAnimationFrame(() => { void followCurrent() }) }
+watch([activeIndex, showRoma, showTranslation, showWords], () => { if (following.value) scheduleFollow() })
 const resume = () => { following.value = true; void followCurrent() }
 const seekToLine = (line: TimedLyricLine) => { if (document.value.synced) { seek(Math.max(0, line.time + offset.value)); resume() } }
-onMounted(() => { resizeObserver = new ResizeObserver(() => { if (following.value) void followCurrent() }); if (scrollArea.value) resizeObserver.observe(scrollArea.value) })
-onUnmounted(() => { generation++; operation?.abort(); resizeObserver?.disconnect(); void stopTranslation() })
+onMounted(() => { resizeObserver = new ResizeObserver(() => { if (following.value) scheduleFollow() }); if (scrollArea.value) resizeObserver.observe(scrollArea.value) })
+onUnmounted(() => { cancelAnimationFrame(followFrame); generation++; operation?.abort(); resizeObserver?.disconnect(); void stopTranslation() })
 </script>
 <template>
   <section class="lyrics-panel" aria-label="歌词">
@@ -210,11 +222,12 @@ onUnmounted(() => { generation++; operation?.abort(); resizeObserver?.disconnect
     </header>
     <div v-if="document.synced && document.lines.length" class="lyric-sync-controls">
       <label>歌词延后 <input v-model.number="offset" type="number" min="-30" max="30" step="0.1" aria-label="歌词时间偏移（秒）" @change="offset = Math.min(30, Math.max(-30, Number(offset) || 0))" /> 秒</label>
-      <button :disabled="offset === 0" @click="offset = 0">重置</button><button v-if="!following" @click="resume">回到当前句</button>
+      <button :disabled="offset === 0" @click="offset = 0">重置</button>
     </div>
     <div ref="scrollArea" class="lyrics-scroll" :class="{ 'is-synced': document.synced }" @wheel.passive="following = false" @touchstart.passive="following = false" @pointerdown="following = false" @keydown="following = false">
       <div v-if="loading" class="lyrics-state" role="status">正在获取歌词…</div>
       <div v-else-if="error" class="lyrics-state"><span>{{ error }}</span></div>
+      <div v-else-if="!document.lines.length" class="lyrics-state"><span>当前歌曲暂无歌词</span><p class="empty-hint">可以查找其他来源，或导入本地 LRC / TXT。</p></div>
       <template v-else>
         <button v-for="(line, index) in document.lines" :key="`${line.time}-${index}`" class="lyric-line" :class="{ 'is-plain': !document.synced }"
           :data-active="index === activeIndex" :aria-current="index === activeIndex ? 'true' : undefined"
@@ -229,18 +242,23 @@ onUnmounted(() => { generation++; operation?.abort(); resizeObserver?.disconnect
         </button>
       </template>
     </div>
+    <button v-if="document.synced && document.lines.length && !following" class="lyric-follow-hint" @click="resume">回到当前</button>
   </section>
 </template>
 <style scoped>
-.lyrics-panel{display:flex;min-height:0;height:100%;flex-direction:column;padding:18px 28px 24px;overflow:hidden}header{padding-bottom:14px;border-bottom:1px solid hsl(var(--border));flex-shrink:0}
+.lyrics-panel{position:relative;display:flex;min-height:0;height:100%;flex-direction:column;padding:18px 28px 24px;overflow:hidden}header{padding-bottom:14px;border-bottom:1px solid hsl(var(--border));flex-shrink:0}
 .lyric-title{display:flex;align-items:center;justify-content:space-between;gap:16px}.lyric-title p{color:var(--primary);font-size:10px;font-weight:700;letter-spacing:.2em}.lyric-title h2{margin-top:4px;font-size:22px;font-weight:650}
 .lyric-mode,.lyric-caption,.lyric-notice{color:hsl(var(--muted-foreground));font-size:12px;line-height:1.6}.lyric-caption{margin-top:8px;overflow-wrap:anywhere}.lyric-notice{margin-top:8px}
 .lyric-toolbar{display:flex;flex-wrap:wrap;gap:4px 8px;margin-top:12px}.lyric-toolbar button,.lyrics-state button,.lyric-sync-controls button{font-size:12px;padding:5px 8px;border:1px solid hsl(var(--border));border-radius:5px;color:hsl(var(--muted-foreground))}
-button:hover:not(:disabled){color:hsl(var(--foreground));border-color:var(--primary)}button:focus-visible,input:focus-visible{outline:2px solid var(--primary);outline-offset:3px}button:disabled{opacity:.45;cursor:default}.lyric-toolbar button[aria-pressed=true]{color:var(--primary)}.file-input{display:none}
+button:hover:not(:disabled){color:hsl(var(--foreground));border-color:var(--primary)}button:focus-visible{outline:2px solid var(--primary);outline-offset:3px}input:focus-visible{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgb(239 111 82 / .12)}button:disabled{opacity:.45;cursor:default}.lyric-toolbar button[aria-pressed=true]{color:var(--primary)}.file-input{display:none}
 .lyric-candidates{display:grid;gap:4px;max-height:160px;overflow-y:auto;margin-top:8px}.lyric-candidates button{text-align:left;padding:7px 8px;border-bottom:1px solid hsl(var(--border));font-size:13px;overflow-wrap:anywhere}.lyric-candidates small{display:block;color:hsl(var(--muted-foreground));font-size:11px}
 .lyric-sync-controls{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding-top:10px;font-size:12px;color:hsl(var(--muted-foreground));flex-shrink:0}.lyric-sync-controls input{width:58px;background:transparent;border:1px solid hsl(var(--border));border-radius:4px;padding:3px 4px;font-variant-numeric:tabular-nums;color:hsl(var(--foreground))}
-.lyrics-scroll{position:relative;min-height:0;flex:1;overflow-y:auto;overflow-x:hidden;padding-block:24px;scrollbar-width:thin;overscroll-behavior:contain}.lyrics-scroll.is-synced{padding-block:20vh}
+.lyrics-scroll{position:relative;min-height:0;flex:1;overflow-y:auto;overflow-x:hidden;padding-block:24px;scrollbar-width:thin;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}@media(max-width:600px){.lyrics-scroll{-webkit-overflow-scrolling:touch;touch-action:pan-y}}.lyrics-scroll.is-synced{padding-block:20vh}
 .lyric-line{display:block;width:100%;padding:12px 4px;color:hsl(var(--muted-foreground));text-align:left;white-space:normal;overflow-wrap:anywhere;transition:color .18s ease;line-height:1.6}.lyric-line span,.lyric-line small{display:block}.lyric-line span{font-size:18px}.lyric-line small{margin-top:5px;font-size:13px;font-weight:400;opacity:.85}.lyric-line .lyric-roma{font-size:12px;letter-spacing:.02em}.lyric-line[data-active=true]{color:var(--primary);font-weight:650}.lyric-line.is-plain:disabled{opacity:1}.lyrics-state{display:flex;min-height:200px;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:hsl(var(--muted-foreground));font-size:13px;text-align:center}
+.empty-hint{font-size:12px;opacity:.85}
+.lyric-follow-hint{position:absolute;right:24px;bottom:18px;z-index:3;padding:7px 12px;border:0;border-radius:999px;background:var(--primary);color:#111216;font-size:12px;font-weight:600;box-shadow:0 6px 18px rgb(239 111 82 / .28);transition:transform .15s ease,filter .15s ease}
+.lyric-follow-hint:hover{filter:brightness(1.06);transform:translateY(-1px)}
+.lyric-follow-hint:active{transform:scale(.96)}
 .lyric-line .lyric-word{display:inline;white-space:pre-wrap}.lyric-line[data-active=true] .lyric-word{color:hsl(var(--muted-foreground))}.lyric-line[data-active=true] .lyric-word[data-passed=true]{color:var(--primary)}.lyric-line[data-active=true] .lyric-word[data-current=true]{text-decoration:underline;text-underline-offset:5px;text-decoration-thickness:1px}
 @media(max-width:600px){.lyrics-panel{padding:12px 16px}.lyric-line span{font-size:17px}.lyric-toolbar{gap:5px}.lyric-sync-controls{font-size:11px}}@media(prefers-reduced-motion:reduce){.lyric-line{transition:none}}
 </style>

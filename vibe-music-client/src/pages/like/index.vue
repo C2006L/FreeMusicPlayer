@@ -126,7 +126,7 @@ onMounted(() => {
             <icon-akar-icons:search
               class="lucide lucide-search absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" />
             <input v-model="searchKeyword" @keyup.enter="handleSearch"
-              class="flex h-10 rounded-lg border border-input transform duration-300 bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-0 pl-10 w-56 max-sm:w-full"
+              class="flex h-10 rounded-lg border border-input transform duration-300 bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:border-[rgba(239,111,82,.55)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[rgba(239,111,82,.45)] focus-visible:ring-offset-0 pl-10 w-56 max-sm:w-full"
               placeholder="搜索" />
           </div>
         </div>

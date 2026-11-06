@@ -62,10 +62,13 @@ html.dark {
     background-color: #f4efe6;
 }
 
+/* 输入框聚焦：单层细边框 + 低饱和光晕，不再叠加第二层粗描边 */
 .el-input__wrapper.is-focus,
 .el-textarea__inner:focus {
-    background-color: #ffffff;
-    box-shadow: 0 0 0 2px var(--el-color-primary) inset;
+    background-color: var(--el-fill-color-blank);
+    box-shadow:
+        0 0 0 1px var(--el-color-primary) inset,
+        0 0 0 3px rgb(239 111 82 / 0.12);
 }
 
 /* 弹窗：纸感卡片 */

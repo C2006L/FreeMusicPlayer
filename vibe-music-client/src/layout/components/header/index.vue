@@ -79,7 +79,7 @@ watch(
         <input
           v-model="searchText"
           type="text"
-          class="h-10 w-full rounded-lg border border-border bg-muted/45 py-2 pl-10 pr-4 text-sm text-foreground outline-none transition placeholder:text-muted-foreground hover:border-border/80 focus:border-primary/60 focus:bg-muted/70"
+          class="h-10 w-full rounded-lg border border-border bg-muted/45 py-2 pl-10 pr-4 text-sm text-foreground outline-none transition placeholder:text-muted-foreground hover:border-border/80 focus:border-[rgba(239,111,82,.55)] focus:bg-muted/70"
           placeholder="搜索歌曲、歌手或专辑"
           @keyup.enter="router.push('/library?query=' + searchText)"
         />

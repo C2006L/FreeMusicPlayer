@@ -69,7 +69,7 @@ const requestProbe = (song: Song) => {
   )
 }
 const userStore = UserStore()
-const { play, isPlaying } = useAudioPlayer()
+const { play, isPlaying, isBuffering } = useAudioPlayer()
 const selectedId = ref<string | null>(null)
 const handleCoverError = (event: Event) => {
   const image = event.target as HTMLImageElement
@@ -171,7 +171,11 @@ const isCurrent = (song: Song) => {
           <span class="playing-rail" aria-hidden="true" />
           <button class="cover-button" :aria-label="`播放 ${song.songName}`" @click.stop="handlePlay(song)">
             <img :src="coverOf(song)" :alt="`${song.songName} 封面`" loading="lazy" @error="handleCoverError" />
-            <span class="cover-overlay"><PlayingIndicator v-if="isCurrent(song)" :paused="!isPlaying" /><icon-tabler:player-play-filled v-else /></span>
+            <span class="cover-overlay">
+              <span v-if="isCurrent(song) && isBuffering" class="cover-spinner" aria-hidden="true" />
+              <PlayingIndicator v-else-if="isCurrent(song)" :paused="!isPlaying" />
+              <icon-tabler:player-play-filled v-else class="cover-play-icon" />
+            </span>
           </button>
           <div class="min-w-0">
             <div class="song-title-line">
@@ -208,9 +212,15 @@ const isCurrent = (song: Song) => {
 .playing-rail { position:absolute; left:0; width:2px; height:28px; border-radius:2px; background:transparent; }
 .is-current .playing-rail { background:var(--primary); }
 .song-primary { display:grid; min-width:0; grid-template-columns:44px minmax(0,1fr); align-items:center; gap:12px; }
-.cover-button { position:relative; width:44px; height:44px; overflow:hidden; border-radius:6px; background:hsl(var(--muted)); }
+.cover-button { position:relative; width:44px; height:44px; overflow:hidden; border-radius:6px; background:hsl(var(--muted)); transition:transform .18s cubic-bezier(.22,.61,.36,1),box-shadow .18s ease; }
+.cover-button:hover { transform:scale(1.04); box-shadow:0 4px 12px rgb(0 0 0/.18); }
+.cover-button:active { transform:scale(.95); transition-duration:.09s; }
 .cover-button img { width:100%; height:100%; object-fit:cover; }
-.cover-overlay { position:absolute; inset:0; display:grid; place-items:center; color:white; background:rgb(0 0 0/.48); opacity:0; transition:opacity .15s ease; }
+.cover-overlay { position:absolute; inset:0; display:grid; place-items:center; color:white; background:rgb(0 0 0/.48); opacity:0; transition:opacity .15s ease,background .15s ease; }
+.cover-play-icon { transition:transform .2s cubic-bezier(.22,.61,.36,1); }
+.cover-button:hover .cover-play-icon { transform:scale(1.12); }
+.cover-spinner { width:16px; height:16px; border:2px solid rgb(255 255 255/.28); border-top-color:#fff; border-radius:50%; animation:cover-spin .75s linear infinite; }
+@keyframes cover-spin { to { transform:rotate(360deg); } }
 .song-row:hover .cover-overlay,.song-row:focus-within .cover-overlay,.is-current .cover-overlay { opacity:1; }
 .song-album,.song-duration { min-width:0; color:hsl(var(--muted-foreground)); font-size:12px; }
 .song-actions { display:flex; justify-content:flex-end; gap:2px; }

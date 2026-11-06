@@ -18,10 +18,12 @@ select {
   font: inherit;
 }
 
+// 键盘焦点兜底：只给应用自身的按钮/链接/可聚焦元素加环。
+// Element Plus 内部元素（如 el-input__inner 也带 tabindex）与原生表单控件
+// 都有自己的聚焦态，这里排除掉，避免出现第二层橙框。
 button:focus-visible,
 a:focus-visible,
-input:focus-visible,
-[tabindex]:focus-visible {
+[tabindex]:focus-visible:not([class*='el-']):not(input):not(textarea):not(select) {
   outline: none;
   box-shadow: var(--focus-ring);
 }

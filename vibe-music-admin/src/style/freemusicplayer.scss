@@ -369,7 +369,9 @@ body[layout="vertical"] {
   box-shadow: 0 12px 36px rgb(0 0 0 / 22%) !important;
 }
 
-*:focus-visible {
+// 表单控件自身的聚焦态统一由 .el-input__wrapper / .el-textarea__inner 提供，
+// 这里排除掉，否则内层 input 会再套一圈 outline，形成双层描边。
+*:focus-visible:not(input):not(textarea):not(select) {
   outline: 2px solid var(--fmp-accent) !important;
   outline-offset: 2px;
 }
