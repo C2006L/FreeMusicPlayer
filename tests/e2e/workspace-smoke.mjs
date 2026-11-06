@@ -80,7 +80,7 @@ try {
  await lyrics.locator('.lyric-roma').getByText('shi n pa i shi ta tte',{exact:true}).waitFor()
  assert.equal(await lyrics.locator('.lyric-translation').textContent(),'即使担心')
  await lyrics.locator('.lyrics-scroll').hover();await page.mouse.wheel(0,-100)
- await lyrics.getByRole('button',{name:'回到当前句',exact:true}).click()
+ await lyrics.getByRole('button',{name:'回到当前',exact:true}).click()
  const timeShift=lyrics.getByRole('spinbutton',{name:'歌词时间偏移（秒）'})
  const cacheBefore=await page.evaluate(()=>new Promise((resolve,reject)=>{const req=indexedDB.open('fmp-lyrics-v1',1);req.onsuccess=()=>{const db=req.result,get=db.transaction('lyrics').objectStore('lyrics').getAll();get.onsuccess=()=>{resolve(get.result[0]);db.close()}};req.onerror=()=>reject(req.error)}))
  await timeShift.fill('0.5');await timeShift.press('Tab')
