@@ -120,7 +120,7 @@ Maven Wrapper 和固定版本的 pnpm 会由脚本调用，无需全局单独安
 .\scripts\start-dev.ps1
 ```
 
-默认启动 MySQL、Redis 和增强音源 API，歌曲通过在线 Provider 实时解析，不依赖 MinIO。首次启动需要下载 `go-music-api` 镜像。需要测试头像、封面或本地音频上传时再运行：
+默认启动 MySQL、Redis 和增强音源 API，歌曲通过在线 Provider 实时解析，不依赖 MinIO。首次启动需要下载 `go-music-api` 镜像。后端 JAR 缺失时会自动执行一次 `-DskipTests package` 构建，不需要先跑 `setup-dev.ps1`；从隧道演示切回本地时，脚本会自动重启仍带着公网地址的进程。需要测试头像、封面或本地音频上传时再运行：
 
 ```powershell
 .\scripts\start-dev.ps1 -WithMinio

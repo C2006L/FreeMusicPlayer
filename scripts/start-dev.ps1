@@ -62,11 +62,26 @@ function Wait-Port([int]$Port, [int]$TimeoutSeconds = 120) {
     throw "Port $Port did not become ready within $TimeoutSeconds seconds."
 }
 
+function Stop-ProjectListener([int]$Port) {
+    if ($Port -le 0) { return }
+    $owners = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty OwningProcess -Unique
+    foreach ($ownerPid in $owners) {
+        $owner = Get-CimInstance Win32_Process -Filter "ProcessId=$ownerPid" -ErrorAction SilentlyContinue
+        if ($owner -and $owner.CommandLine -and $owner.CommandLine -like "*$projectRoot*") {
+            Stop-Process -Id $ownerPid -Force -ErrorAction SilentlyContinue
+            Write-Host "Stopped stale listener on port $Port (PID $ownerPid)."
+            Start-Sleep -Milliseconds 500
+        }
+    }
+}
+
 function Start-ManagedProcess(
     [string]$Name,
     [string]$FilePath,
     [string[]]$Arguments,
-    [string]$WorkingDirectory
+    [string]$WorkingDirectory,
+    [int]$Port = 0
 ) {
     $pidFile = Join-Path $pidRoot "$Name.pid"
     if (Test-Path $pidFile) {
@@ -76,7 +91,12 @@ function Start-ManagedProcess(
             Write-Host "$Name is already running (PID $oldPid)."
             return
         }
+        Remove-Item $pidFile -ErrorAction SilentlyContinue
     }
+    # A previous run (or a tunnel demo) may still own the port without a live
+    # pid file. Only processes from this project are stopped, so an unrelated
+    # application on the same port is never touched.
+    Stop-ProjectListener $Port
     $stdout = Join-Path $logRoot "$Name.out.log"
     $stderr = Join-Path $logRoot "$Name.err.log"
     $process = Start-Process -FilePath $FilePath -ArgumentList $Arguments `
@@ -93,7 +113,7 @@ function Stop-ManagedProcess([string]$Name) {
     $existing = Get-CimInstance Win32_Process -Filter "ProcessId=$processId" -ErrorAction SilentlyContinue
     if ($existing -and $existing.CommandLine -like '*vibe-music*') {
         Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
-        Write-Host "Stopped $Name (PID $processId) to apply new public URLs."
+        Write-Host "Stopped $Name (PID $processId)."
         Start-Sleep -Milliseconds 800
     }
     Remove-Item $pidFile -ErrorAction SilentlyContinue
@@ -121,6 +141,26 @@ if ($Tunnel) {
     while ((Get-NetTCPConnection -LocalPort $backendPort -State Listen -ErrorAction SilentlyContinue) -and (Get-Date) -lt $releaseDeadline) {
         Start-Sleep -Milliseconds 500
     }
+}
+
+# Remember whether the running processes were started for a tunnel or for
+# localhost. A tunnel demo leaves .env values in the child processes, so a
+# plain start afterwards must restart them instead of reusing stale URLs.
+$modeFile = Join-Path $runtimeRoot 'dev-mode.txt'
+$mode = if ($Tunnel) { 'tunnel' } else { 'local' }
+if (-not $Tunnel) {
+    $tunnelEnv = Join-Path $runtimeRoot 'tunnel.env'
+    if (Test-Path $tunnelEnv) {
+        Write-Host 'Stopping leftover tunnels for local mode ...'
+        & (Join-Path $PSScriptRoot 'tunnel-dev.ps1') -Stop
+    }
+}
+$previousMode = if (Test-Path $modeFile) { (Get-Content $modeFile -Raw).Trim() } else { '' }
+if ($previousMode -and $previousMode -ne $mode -and -not $Tunnel) {
+    Write-Host "Switching from $previousMode mode to $mode mode; restarting managed processes ..."
+    Stop-ManagedProcess 'backend'
+    Stop-ManagedProcess 'client'
+    Stop-ManagedProcess 'admin'
 }
 
 if (-not $BackendOnly) {
@@ -158,7 +198,7 @@ if ($WithMail) {
 }
 
 $env:GO_MUSIC_API_URL = 'http://127.0.0.1:3002'
-Start-ManagedProcess 'provider' 'node.exe' @((Join-Path $projectRoot 'vibe-music-provider\supervise.mjs')) (Join-Path $projectRoot 'vibe-music-provider')
+Start-ManagedProcess 'provider' 'node.exe' @((Join-Path $projectRoot 'vibe-music-provider\supervise.mjs')) (Join-Path $projectRoot 'vibe-music-provider') -Port 3001
 Wait-Port 3001 30
 }
 
@@ -166,7 +206,28 @@ $backendDir = Join-Path $projectRoot 'vibe-music-backend\vibe-music-server'
 $backendJar = Join-Path $backendDir 'target\vibe-music-server-0.0.1-SNAPSHOT.jar'
 $dockerConfig = Join-Path $projectRoot 'config\application-docker.yml'
 if (-not (Test-Path $backendJar)) {
-    throw 'Backend JAR is missing. Run .\scripts\setup-dev.ps1 first.'
+    # `mvn test` or `mvn clean` leaves no runnable jar, so a plain start used to
+    # stop here and ask for a separate setup step. Build it once, tests skipped.
+    $mavenRoot = Join-Path $projectRoot 'vibe-music-backend'
+    $mavenWrapper = Join-Path $mavenRoot 'mvnw.cmd'
+    if (-not (Test-Path $mavenWrapper)) {
+        throw "Backend JAR is missing and $mavenWrapper was not found. Run .\scripts\setup-dev.ps1 once."
+    }
+    Write-Host 'Backend JAR is missing; building it now (tests skipped) ...'
+    $mavenRepo = Join-Path $runtimeRoot 'm2'
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    Push-Location $mavenRoot
+    try {
+        & $mavenWrapper "-Dmaven.repo.local=$mavenRepo" -DskipTests package 2>&1 | ForEach-Object { Write-Host $_ }
+        $buildExit = $LASTEXITCODE
+    } finally {
+        Pop-Location
+        $ErrorActionPreference = $previous
+    }
+    if ($buildExit -ne 0 -or -not (Test-Path $backendJar)) {
+        throw "Backend build failed (exit $buildExit). Check the network and the Maven cache in .runtime\m2, or run .\scripts\setup-dev.ps1 once."
+    }
 }
 if (-not (Test-Path $dockerConfig)) {
     throw "Docker development config is missing: $dockerConfig"
@@ -178,7 +239,7 @@ Start-ManagedProcess 'backend' 'java.exe' @(
     $backendJar,
     "--spring.config.additional-location=$configUri",
     "--vibe-music.minio.enabled=$minioEnabled"
-) $backendDir
+) $backendDir -Port $backendPort
 Wait-Port $backendPort 180
 $healthDeadline = (Get-Date).AddSeconds(45)
 $healthy = $false
@@ -199,15 +260,17 @@ if (-not $healthy) { throw 'FreeMusicPlayer dependencies did not become ready. O
 if ($BackendOnly) { Write-Host "FreeMusicPlayer backend ready: http://localhost:$backendPort"; return }
 
 $clientVite = Join-Path $projectRoot 'vibe-music-client\node_modules\vite\bin\vite.js'
-Start-ManagedProcess 'client' 'node.exe' @($clientVite, '--host', '0.0.0.0') (Join-Path $projectRoot 'vibe-music-client')
+Start-ManagedProcess 'client' 'node.exe' @($clientVite, '--host', '0.0.0.0') (Join-Path $projectRoot 'vibe-music-client') -Port 8090
 Wait-Port 8090 180
 
 if (-not $WithoutAdmin) {
     $adminVite = Join-Path $projectRoot 'vibe-music-admin\node_modules\vite\bin\vite.js'
     $adminHost = if ($ExposeAdmin) { '0.0.0.0' } else { '127.0.0.1' }
-    Start-ManagedProcess 'admin' 'node.exe' @($adminVite, '--host', $adminHost) (Join-Path $projectRoot 'vibe-music-admin')
+    Start-ManagedProcess 'admin' 'node.exe' @($adminVite, '--host', $adminHost) (Join-Path $projectRoot 'vibe-music-admin') -Port 8089
     Wait-Port 8089 180
 }
+
+Set-Content -Path $modeFile -Value $mode -Encoding ascii
 
 Write-Host ''
 Write-Host 'FreeMusicPlayer is ready:' -ForegroundColor Green
