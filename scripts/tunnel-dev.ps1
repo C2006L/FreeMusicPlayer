@@ -1,5 +1,8 @@
 param(
-    [switch]$Stop
+    [switch]$Stop,
+    # Directory that holds the auto-downloaded cloudflared.exe. The self-test
+    # points this at a temporary directory so the real binary is never touched.
+    [string]$ToolsDir
 )
 
 $ErrorActionPreference = 'Stop'
@@ -8,15 +11,11 @@ $runtimeRoot = Join-Path $projectRoot '.runtime'
 $logRoot = Join-Path $runtimeRoot 'logs'
 $pidRoot = Join-Path $runtimeRoot 'pids'
 $envFile = Join-Path $runtimeRoot 'tunnel.env'
+if (-not $ToolsDir) { $ToolsDir = Join-Path $runtimeRoot 'tools' }
+$localCloudflared = Join-Path $ToolsDir 'cloudflared.exe'
+$defaultDownloadUrl = 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe'
+$minimumDownloadBytes = 20MB
 New-Item -ItemType Directory -Force -Path $logRoot, $pidRoot | Out-Null
-
-function Get-CloudflaredPath {
-    $command = Get-Command cloudflared -ErrorAction SilentlyContinue
-    if ($command) { return $command.Source }
-    $local = Join-Path $runtimeRoot 'tools\cloudflared.exe'
-    if (Test-Path $local) { return $local }
-    return $null
-}
 
 function Stop-Tunnel([string]$Name) {
     $pidFile = Join-Path $pidRoot "$Name.pid"
@@ -37,13 +36,85 @@ if ($Stop) {
     return
 }
 
-$cloudflared = Get-CloudflaredPath
-if (-not $cloudflared) {
-    Write-Host 'cloudflared was not found.' -ForegroundColor Yellow
-    Write-Host 'Install one of these ways, then re-run:'
-    Write-Host '  winget install --id Cloudflare.cloudflared -e'
-    Write-Host "  or put cloudflared.exe under $runtimeRoot\tools\"
-    throw 'cloudflared is required for quick tunnels.'
+# A binary counts as usable only when it runs and prints the expected version line.
+function Test-Cloudflared([string]$Path) {
+    if (-not $Path -or -not (Test-Path $Path)) { return $false }
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = (& $Path --version 2>&1 | Out-String)
+        return ($output -match 'cloudflared version \d+\.\d+\.\d+')
+    } catch {
+        return $false
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+}
+
+# PATH wins, then the tools directory; anything that cannot execute is ignored.
+function Resolve-Cloudflared {
+    $command = Get-Command cloudflared -ErrorAction SilentlyContinue
+    if ($command -and (Test-Cloudflared $command.Source)) { return $command.Source }
+    if (Test-Cloudflared $localCloudflared) { return $localCloudflared }
+    return $null
+}
+
+function Get-DownloadFailureReason([Exception]$ErrorValue) {
+    if ($ErrorValue -is [System.Net.WebException]) { return "network: $($ErrorValue.Status)" }
+    if ($ErrorValue.PSObject.Properties['StatusCode']) { return "http: $($ErrorValue.StatusCode)" }
+    return "error: $($ErrorValue.Message)"
+}
+
+function Install-Cloudflared {
+    $url = if ($env:FMP_CLOUDFLARED_URL) { $env:FMP_CLOUDFLARED_URL } else { $defaultDownloadUrl }
+    New-Item -ItemType Directory -Force -Path $ToolsDir | Out-Null
+    # Keep the .exe extension so the download can be executed before being moved.
+    $temp = Join-Path $ToolsDir ("cloudflared-download-{0}.exe" -f [Guid]::NewGuid().ToString('N'))
+    Write-Host 'cloudflared was not found or is not runnable; fetching a copy ...'
+    Write-Host "  source: $url"
+    Write-Host "  target: $localCloudflared"
+    $previousProgress = $ProgressPreference
+    $previousProtocol = [Net.ServicePointManager]::SecurityProtocol
+    $ProgressPreference = 'SilentlyContinue'
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = $previousProtocol -bor [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -Uri $url -OutFile $temp -UseBasicParsing -TimeoutSec 300
+    } catch {
+        $reason = Get-DownloadFailureReason $_.Exception
+        Write-Host ''
+        Write-Host "cloudflared download failed ($reason)." -ForegroundColor Yellow
+        Write-Host 'Run the one-line fix that matches your case, then re-run this script:'
+        Write-Host '  network/DNS:   Test-NetConnection github.com -Port 443   (still fails: change network, or set FMP_CLOUDFLARED_URL to a mirror)'
+        Write-Host '  proxy/VPN:     $env:HTTPS_PROXY=''http://127.0.0.1:7890''   (your proxy port, or disconnect the VPN)'
+        Write-Host "  interrupted:   Remove-Item '$ToolsDir\cloudflared-download-*.exe' -Force; re-run, or curl.exe -L '$url' -o '$localCloudflared'"
+        Write-Host "  antivirus:     Add-MpPreference -ExclusionPath '$ToolsDir'   (admin shell), or whitelist the exe"
+        Write-Host '  mirror source: $env:FMP_CLOUDFLARED_URL=''https://<mirror>/cloudflared-windows-amd64.exe'''
+        throw "cloudflared download failed ($reason)."
+    } finally {
+        [Net.ServicePointManager]::SecurityProtocol = $previousProtocol
+        $ProgressPreference = $previousProgress
+    }
+    if (-not (Test-Path $temp)) { throw 'cloudflared download produced no file.' }
+    $size = (Get-Item $temp).Length
+    if ($size -lt $minimumDownloadBytes) {
+        Remove-Item $temp -Force -ErrorAction SilentlyContinue
+        throw "Downloaded file is only $size bytes, expected at least $minimumDownloadBytes. The URL returned something other than the cloudflared binary; check FMP_CLOUDFLARED_URL."
+    }
+    if (-not (Test-Cloudflared $temp)) {
+        Remove-Item $temp -Force -ErrorAction SilentlyContinue
+        throw "Downloaded file cannot run 'cloudflared --version'. Antivirus may be blocking it; whitelist $ToolsDir and re-run."
+    }
+    # Same-directory move: the final path only appears once the file is complete and verified.
+    Move-Item -Path $temp -Destination $localCloudflared -Force
+    Write-Host "cloudflared verified: $((& $localCloudflared --version | Out-String).Trim())"
+    return $localCloudflared
+}
+
+$cloudflared = Resolve-Cloudflared
+if ($cloudflared) {
+    Write-Host "cloudflared: $cloudflared (download skipped)"
+} else {
+    $cloudflared = Install-Cloudflared
 }
 
 Stop-Tunnel 'tunnel-client'

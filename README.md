@@ -164,6 +164,23 @@ $env:FMP_PUBLIC_HOST = '<本机局域网IP>'   # 脚本会自动推导 VITE_APP_
 - 管理端默认只监听 `127.0.0.1`；确需让手机访问管理端时显式运行 `.\scripts\start-dev.ps1 -ExposeAdmin`。
 - 没有配置平台登录态（Cookie）时，网易云 / QQ 多数只返回试听片段，因此用户端默认搜索源不含这两个平台，可在曲库页手动指定来源。
 
+### 公网临时隧道（演示用）
+
+本机连了 VPN 或处于终端隔离的网络时，局域网地址无法被其他设备访问，可临时把前后端暴露到公网：
+
+```powershell
+.\scripts\start-dev.ps1 -Tunnel
+```
+
+脚本会起两条 cloudflared quick tunnel（8090 用户端、18080 后端），把随机生成的公网地址自动写进 `VITE_APP_BASE_API`、`VIBE_MUSIC_PROVIDER_PUBLIC_URL`、`FMP_ALLOWED_ORIGINS` 后重启前后端，不需要手改配置。cloudflared 缺失或无法执行时会自动下载到 `.runtime\tools\cloudflared.exe`（下载源可用 `FMP_CLOUDFLARED_URL` 覆盖）。管理端 8089 不对外，数据库、缓存、对象存储端口也不映射。
+
+演示结束后关闭隧道并恢复本地开发环境：
+
+```powershell
+.\scripts\tunnel-dev.ps1 -Stop
+.\scripts\start-dev.ps1
+```
+
 ### 停止
 
 ```powershell
