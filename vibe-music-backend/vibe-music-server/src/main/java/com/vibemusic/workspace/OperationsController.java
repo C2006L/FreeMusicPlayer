@@ -17,6 +17,48 @@ public class OperationsController {
         return Result.success(Map.of("jobs",db.queryForList("SELECT status,COUNT(*) count FROM fmp_import_job GROUP BY status"),"recentJobs",db.queryForList("SELECT id,user_id,title,status,total,processed,failed,updated_at FROM fmp_import_job ORDER BY created_at DESC LIMIT 50"),"audit",db.queryForList("SELECT * FROM fmp_audit ORDER BY id DESC LIMIT 100"),"http",http,"worker",Map.of("active",worker.active(),"queued",worker.queued(),"threads",2,"queueCapacity",4)));
     }
     @GetMapping(value="/prometheus",produces="text/plain") public String prometheus(){WorkspaceAccess.admin();return prometheus.scrape();}
+    @GetMapping("/dashboard") public Result<?> dashboard(){
+        WorkspaceAccess.admin();
+        // 首页数字卡：全部来自真实表计数，空表返回 0。
+        long users=count("SELECT COUNT(*) FROM tb_user");
+        long todayUsers=count("SELECT COUNT(*) FROM tb_user WHERE create_time >= CURDATE()");
+        long artists=count("SELECT COUNT(*) FROM tb_artist");
+        long artistsWithArea=count("SELECT COUNT(*) FROM tb_artist WHERE area IS NOT NULL AND area <> ''");
+        long artistsWithGender=count("SELECT COUNT(*) FROM tb_artist WHERE gender IS NOT NULL");
+        long songs=count("SELECT COUNT(*) FROM tb_song");
+        long activeSongs=count("SELECT COUNT(*) FROM tb_song WHERE media_status='active'");
+        long playlists=count("SELECT COUNT(*) FROM tb_playlist");
+        // 只保留数据库中真实存在并可聚合的维度：曲库来源、可播状态、匿名访客、搜索关键词、导入任务。
+        var sources=db.queryForList("SELECT source AS name,COUNT(*) AS count FROM tb_song GROUP BY source ORDER BY count DESC");
+        var mediaStatus=db.queryForList("SELECT media_status AS name,COUNT(*) AS count FROM tb_song GROUP BY media_status ORDER BY count DESC");
+        var importJobs=db.queryForList("SELECT status AS name,COUNT(*) AS count FROM fmp_import_job GROUP BY status ORDER BY count DESC");
+        var topKeywords=db.queryForList("SELECT keyword AS name,COUNT(*) AS count FROM fmp_visitor_event WHERE event='search' AND keyword IS NOT NULL GROUP BY keyword ORDER BY count DESC LIMIT 10");
+        // 趋势按天补齐，避免空数据时前端画出断裂或虚构曲线。
+        var userTrend=daily("SELECT DATE(create_time) AS day,COUNT(*) AS count FROM tb_user WHERE create_time >= CURDATE() - INTERVAL 13 DAY GROUP BY day",14);
+        var visitorTrend=daily("SELECT DATE(created_at) AS day,COUNT(DISTINCT visitor_id) AS count FROM fmp_visitor_event WHERE created_at >= CURDATE() - INTERVAL 6 DAY GROUP BY day",7);
+        Map<String,Object> payload=new LinkedHashMap<>();
+        payload.put("users",Map.of("total",users,"today",todayUsers));
+        payload.put("artists",Map.of("total",artists,"withArea",artistsWithArea,"withGender",artistsWithGender));
+        payload.put("songs",Map.of("total",songs,"active",activeSongs));
+        payload.put("playlists",Map.of("total",playlists));
+        payload.put("sources",sources);
+        payload.put("mediaStatus",mediaStatus);
+        payload.put("importJobs",importJobs);
+        payload.put("topKeywords",topKeywords);
+        payload.put("userTrend",userTrend);
+        payload.put("visitorTrend",visitorTrend);
+        payload.put("generatedAt",new java.util.Date().toString());
+        return Result.success(payload);
+    }
+    private long count(String sql){Long value=db.queryForObject(sql,Long.class);return value==null?0L:value;}
+    private List<Map<String,Object>> daily(String sql,int days){
+        Map<String,Long> byDay=new HashMap<>();
+        for(Map<String,Object> row:db.queryForList(sql)){byDay.put(String.valueOf(row.get("day")),((Number)row.get("count")).longValue());}
+        List<Map<String,Object>> series=new ArrayList<>();
+        java.time.LocalDate today=java.time.LocalDate.now();
+        for(int i=days-1;i>=0;i--){String day=today.minusDays(i).toString();series.add(Map.of("date",day,"count",byDay.getOrDefault(day,0L)));}
+        return series;
+    }
     @GetMapping("/visitors") public Result<?> visitors(){
         WorkspaceAccess.admin();
         // 匿名统计只保留 7 天；页面和清理用同一个窗口。

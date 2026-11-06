@@ -37,6 +37,10 @@ export const getAllSongsCount = (style?: string) => {
   });
 };
 
+/** 获取内容控制台真实聚合指标（数字卡、曲库来源、可播性、访客趋势等） */
+export const getDashboardMetrics = () =>
+  http.request<Result>("get", "/admin/ops/dashboard");
+
 /** 获取歌单数量 */
 export const getAllPlaylistsCount = (style?: string) => {
   const userData = getToken();

@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed } from "vue";
 import ReCol from "@/components/ReCol";
 import { useDark } from "./utils";
 import { ReNormalCountTo } from "@/components/ReCountTo";
-import { ChartBar, ChartLine, ChartPie1, ChartPie2 } from "./components/charts";
+import { ChartBar, ChartLine, ChartPie1 } from "./components/charts";
 import useChartData from "./hooks/useChartData";
 import GroupLine from "@iconify-icons/ri/group-line";
 import Artist from "@iconify-icons/ri/mic-fill";
@@ -15,49 +15,30 @@ defineOptions({
 });
 
 const { isDark } = useDark();
+const { metrics, loading, error, refresh } = useChartData();
 
-const {
-  userCount,
-  artistCount,
-  songCount,
-  playlistCount,
-  westernPopCount,
-  chinesePopCount,
-  cantonesePopCount,
-  koreanPopCount,
-  classicCount,
-  hiphopCount,
-  rockCount,
-  electronicCount,
-  jazzCount,
-  lightCount,
-  countAmerica,
-  countChina,
-  countKorea,
-  countJapan,
-  countGermany,
-  countBritain,
-  maleCount,
-  femaleCount
-} = useChartData();
-
-const pieChartData1 = ref([
-  { value: westernPopCount, name: "欧美流行" },
-  { value: chinesePopCount, name: "华语流行" },
-  { value: cantonesePopCount, name: "粤语流行" },
-  { value: koreanPopCount, name: "韩国流行" },
-  { value: classicCount, name: "古典" },
-  { value: hiphopCount, name: "嘻哈说唱" },
-  { value: rockCount, name: "摇滚" },
-  { value: electronicCount, name: "电子" },
-  { value: jazzCount, name: "节奏布鲁斯" },
-  { value: lightCount, name: "轻音乐" }
-]);
-
-const pieChartData2 = ref([
-  { value: maleCount, name: "男" },
-  { value: femaleCount, name: "女" }
-]);
+const userCount = computed(() => metrics.value?.users.total ?? 0);
+const todayUsers = computed(() => metrics.value?.users.today ?? 0);
+const artistCount = computed(() => metrics.value?.artists.total ?? 0);
+const artistsWithArea = computed(() => metrics.value?.artists.withArea ?? 0);
+const songCount = computed(() => metrics.value?.songs.total ?? 0);
+const activeSongs = computed(() => metrics.value?.songs.active ?? 0);
+const playlistCount = computed(() => metrics.value?.playlists.total ?? 0);
+// 用户卡片的趋势线来自 tb_user.create_time 的 14 天按日统计，只取最近 7 天。
+const userSpark = computed(() =>
+  (metrics.value?.userTrend ?? []).slice(-7).map(point => point.count)
+);
+// 图表类目与数值全部来自数据库 GROUP BY 结果。
+const sourceData = computed(() => metrics.value?.sources ?? []);
+const mediaStatusData = computed(() => metrics.value?.mediaStatus ?? []);
+const visitorTrendData = computed(() =>
+  (metrics.value?.visitorTrend ?? []).map(point => ({
+    name: point.date.slice(5),
+    count: point.count
+  }))
+);
+const keywordData = computed(() => metrics.value?.topKeywords ?? []);
+const importJobData = computed(() => metrics.value?.importJobs ?? []);
 </script>
 
 <template>
@@ -67,14 +48,18 @@ const pieChartData2 = ref([
         <p class="dashboard-kicker">LIBRARY OVERVIEW</p>
         <h1>内容控制台</h1>
         <p class="dashboard-description">
-          查看 FreeMusicPlayer
-          当前曲库与用户数据，并从左侧导航进入具体管理任务。
+          数据来自本机数据库实时聚合：数字卡为表计数，图表为 GROUP BY
+          结果，空数据时显示空态。
         </p>
       </div>
-      <div class="dashboard-context" aria-label="控制台范围">
-        <span>用户</span><span>音乐内容</span><span>运营反馈</span>
+      <div class="dashboard-actions">
+        <span v-if="metrics?.generatedAt" class="dashboard-time"
+          >更新于 {{ metrics.generatedAt }}</span
+        >
+        <el-button :loading="loading" @click="refresh">刷新</el-button>
       </div>
     </header>
+    <p v-if="error" class="dashboard-error" role="alert">{{ error }}</p>
     <div class="section-label">关键数据</div>
     <el-row :gutter="24" justify="space-around">
       <re-col
@@ -84,23 +69,12 @@ const pieChartData2 = ref([
         :md="12"
         :sm="12"
         :xs="24"
-        :initial="{
-          opacity: 0,
-          y: 100
-        }"
-        :enter="{
-          opacity: 1,
-          y: 0,
-          transition: {
-            delay: 80 * 1
-          }
-        }"
+        :initial="{ opacity: 0, y: 100 }"
+        :enter="{ opacity: 1, y: 0, transition: { delay: 80 * 1 } }"
       >
         <el-card class="line-card" shadow="never">
           <div class="flex justify-between">
-            <span class="text-md font-medium">
-              {{ "用户数量" }}
-            </span>
+            <span class="text-md font-medium">{{ "用户数量" }}</span>
             <div
               class="w-8 h-8 flex justify-center items-center rounded-md"
               :style="{
@@ -119,16 +93,17 @@ const pieChartData2 = ref([
               <ReNormalCountTo
                 :duration="2200"
                 :fontSize="'2.5em'"
-                :startVal="100"
+                :startVal="0"
                 :endVal="userCount"
               />
             </div>
             <ChartLine
               class="!w-1/2"
               :color="'#ef6f52'"
-              :data="[210, 439, 530, 496, 575, 680, 845]"
+              :data="userSpark"
             />
           </div>
+          <p class="metric-note">注册用户 · 今日新增 {{ todayUsers }}</p>
         </el-card>
       </re-col>
 
@@ -139,23 +114,12 @@ const pieChartData2 = ref([
         :md="12"
         :sm="12"
         :xs="24"
-        :initial="{
-          opacity: 0,
-          y: 100
-        }"
-        :enter="{
-          opacity: 1,
-          y: 0,
-          transition: {
-            delay: 80 * 2
-          }
-        }"
+        :initial="{ opacity: 0, y: 100 }"
+        :enter="{ opacity: 1, y: 0, transition: { delay: 80 * 2 } }"
       >
         <el-card class="line-card" shadow="never">
           <div class="flex justify-between">
-            <span class="text-md font-medium">
-              {{ "歌手数量" }}
-            </span>
+            <span class="text-md font-medium">{{ "歌手数量" }}</span>
             <div
               class="w-8 h-8 flex justify-center items-center rounded-md"
               :style="{
@@ -170,20 +134,19 @@ const pieChartData2 = ref([
             </div>
           </div>
           <div class="flex justify-between items-start mt-3">
-            <div class="w-1/2">
+            <div class="w-full">
               <ReNormalCountTo
                 :duration="2200"
                 :fontSize="'2.5em'"
-                :startVal="100"
+                :startVal="0"
                 :endVal="artistCount"
               />
             </div>
-            <ChartLine
-              class="!w-1/2"
-              :color="'#e7a36e'"
-              :data="[210, 399, 500, 492, 652, 688, 850]"
-            />
           </div>
+          <p class="metric-note">
+            {{ artistsWithArea }} 位已标注国籍 ·
+            {{ metrics?.artists.withGender ?? 0 }} 位已标注性别
+          </p>
         </el-card>
       </re-col>
 
@@ -194,23 +157,12 @@ const pieChartData2 = ref([
         :md="12"
         :sm="12"
         :xs="24"
-        :initial="{
-          opacity: 0,
-          y: 100
-        }"
-        :enter="{
-          opacity: 1,
-          y: 0,
-          transition: {
-            delay: 80 * 3
-          }
-        }"
+        :initial="{ opacity: 0, y: 100 }"
+        :enter="{ opacity: 1, y: 0, transition: { delay: 80 * 3 } }"
       >
         <el-card class="line-card" shadow="never">
           <div class="flex justify-between">
-            <span class="text-md font-medium">
-              {{ "歌曲数量" }}
-            </span>
+            <span class="text-md font-medium">{{ "歌曲记录" }}</span>
             <div
               class="w-8 h-8 flex justify-center items-center rounded-md"
               :style="{
@@ -221,20 +173,18 @@ const pieChartData2 = ref([
             </div>
           </div>
           <div class="flex justify-between items-start mt-3">
-            <div class="w-1/2">
+            <div class="w-full">
               <ReNormalCountTo
                 :duration="2200"
                 :fontSize="'2.5em'"
-                :startVal="100"
+                :startVal="0"
                 :endVal="songCount"
               />
             </div>
-            <ChartLine
-              class="!w-1/2"
-              :color="'#d8c0ae'"
-              :data="[2101, 3399, 5300, 4962, 6952, 6808, 8450]"
-            />
           </div>
+          <p class="metric-note">
+            已启用 {{ activeSongs }} · 其余为历史种子记录（disabled）
+          </p>
         </el-card>
       </re-col>
 
@@ -245,23 +195,12 @@ const pieChartData2 = ref([
         :md="12"
         :sm="12"
         :xs="24"
-        :initial="{
-          opacity: 0,
-          y: 100
-        }"
-        :enter="{
-          opacity: 1,
-          y: 0,
-          transition: {
-            delay: 80 * 4
-          }
-        }"
+        :initial="{ opacity: 0, y: 100 }"
+        :enter="{ opacity: 1, y: 0, transition: { delay: 80 * 4 } }"
       >
         <el-card class="line-card" shadow="never">
           <div class="flex justify-between">
-            <span class="text-md font-medium">
-              {{ "歌单数量" }}
-            </span>
+            <span class="text-md font-medium">{{ "歌单数量" }}</span>
             <div
               class="w-8 h-8 flex justify-center items-center rounded-md"
               :style="{
@@ -272,18 +211,37 @@ const pieChartData2 = ref([
             </div>
           </div>
           <div class="flex justify-between items-start mt-3">
-            <div class="w-1/2">
+            <div class="w-full">
               <ReNormalCountTo
                 :duration="2200"
                 :fontSize="'2.5em'"
-                :startVal="100"
+                :startVal="0"
                 :endVal="playlistCount"
               />
             </div>
-            <ChartLine
-              class="!w-1/2"
-              :color="'#9d7d6c'"
-              :data="[2101, 5288, 4239, 4962, 6752, 5208, 7450]"
+          </div>
+          <p class="metric-note">后台维护的系统歌单</p>
+        </el-card>
+      </re-col>
+
+      <re-col
+        v-motion
+        class="mb-[18px]"
+        :value="12"
+        :xs="24"
+        :initial="{ opacity: 0, y: 100 }"
+        :enter="{ opacity: 1, y: 0, transition: { delay: 400 } }"
+      >
+        <el-card class="bar-card" shadow="never">
+          <div class="flex justify-between">
+            <span class="text-md font-medium">曲库来源分布</span>
+            <span class="chart-caption">tb_song.source</span>
+          </div>
+          <div class="chart-body">
+            <ChartPie1
+              :chartData="sourceData"
+              seriesName="歌曲数"
+              emptyText="tb_song 暂无记录"
             />
           </div>
         </el-card>
@@ -294,69 +252,90 @@ const pieChartData2 = ref([
         class="mb-[18px]"
         :value="12"
         :xs="24"
-        :initial="{
-          opacity: 0,
-          y: 100
-        }"
-        :enter="{
-          opacity: 1,
-          y: 0,
-          transition: {
-            delay: 400
-          }
-        }"
+        :initial="{ opacity: 0, y: 100 }"
+        :enter="{ opacity: 1, y: 0, transition: { delay: 400 } }"
       >
         <el-card class="bar-card" shadow="never">
           <div class="flex justify-between">
-            <span class="text-md font-medium">歌曲类型比例</span>
+            <span class="text-md font-medium">曲库可播性分布</span>
+            <span class="chart-caption">tb_song.media_status</span>
           </div>
-          <div class="flex justify-between items-start mt-3">
-            <ChartPie1 :chartData="pieChartData1" />
-          </div>
-        </el-card>
-      </re-col>
-
-      <re-col
-        v-motion
-        class="mb-[18px]"
-        :value="12"
-        :xs="24"
-        :initial="{
-          opacity: 0,
-          y: 100
-        }"
-        :enter="{
-          opacity: 1,
-          y: 0,
-          transition: {
-            delay: 400
-          }
-        }"
-      >
-        <el-card class="bar-card" shadow="never">
-          <div class="flex justify-between">
-            <span class="text-md font-medium">歌手国籍分布</span>
-          </div>
-          <div class="flex justify-between items-start mt-3">
+          <div class="chart-body">
             <ChartBar
-              :barChartData="[
-                countAmerica,
-                countChina,
-                countKorea,
-                countJapan,
-                countGermany,
-                countBritain
-              ]"
+              :items="mediaStatusData"
+              seriesName="歌曲数"
+              emptyText="暂无曲库记录"
             />
           </div>
         </el-card>
+      </re-col>
 
-        <el-card class="bar-card bar-position" shadow="never">
+      <re-col
+        v-motion
+        class="mb-[18px]"
+        :value="12"
+        :xs="24"
+        :initial="{ opacity: 0, y: 100 }"
+        :enter="{ opacity: 1, y: 0, transition: { delay: 400 } }"
+      >
+        <el-card class="bar-card" shadow="never">
           <div class="flex justify-between">
-            <span class="text-md font-medium">歌手性别比例</span>
+            <span class="text-md font-medium">匿名访客趋势（近 7 天去重）</span>
+            <span class="chart-caption">fmp_visitor_event</span>
           </div>
-          <div class="flex justify-between items-start mt-3">
-            <ChartPie2 :chartData="pieChartData2" />
+          <div class="chart-body">
+            <ChartBar
+              :items="visitorTrendData"
+              seriesName="访客"
+              emptyText="近 7 天暂无匿名访问"
+            />
+          </div>
+        </el-card>
+      </re-col>
+
+      <re-col
+        v-motion
+        class="mb-[18px]"
+        :value="12"
+        :xs="24"
+        :initial="{ opacity: 0, y: 100 }"
+        :enter="{ opacity: 1, y: 0, transition: { delay: 400 } }"
+      >
+        <el-card class="bar-card" shadow="never">
+          <div class="flex justify-between">
+            <span class="text-md font-medium">匿名搜索关键词 Top</span>
+            <span class="chart-caption">search · 近 7 天</span>
+          </div>
+          <div class="chart-body">
+            <ChartBar
+              :items="keywordData"
+              seriesName="搜索次数"
+              horizontal
+              emptyText="暂无匿名搜索关键词"
+            />
+          </div>
+        </el-card>
+      </re-col>
+
+      <re-col
+        v-motion
+        class="mb-[18px]"
+        :value="12"
+        :xs="24"
+        :initial="{ opacity: 0, y: 100 }"
+        :enter="{ opacity: 1, y: 0, transition: { delay: 400 } }"
+      >
+        <el-card class="bar-card" shadow="never">
+          <div class="flex justify-between">
+            <span class="text-md font-medium">导入任务状态分布</span>
+            <span class="chart-caption">fmp_import_job</span>
+          </div>
+          <div class="chart-body">
+            <ChartBar
+              :items="importJobData"
+              seriesName="任务数"
+              emptyText="暂无导入任务"
+            />
           </div>
         </el-card>
       </re-col>
@@ -431,19 +410,43 @@ const pieChartData2 = ref([
   font-size: 14px;
 }
 
-.dashboard-context {
+.dashboard-actions {
   display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
   justify-content: flex-end;
+  flex-wrap: wrap;
 }
 
-.dashboard-context span {
-  padding: 6px 10px;
+.dashboard-time {
   color: var(--fmp-text-muted);
   font-size: 12px;
-  border: 1px solid var(--fmp-border);
-  border-radius: 999px;
+}
+
+.dashboard-error {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  color: #b42318;
+  background: #fef3f2;
+  border-radius: 8px;
+}
+
+.metric-note {
+  margin: 8px 0 0;
+  color: var(--fmp-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.chart-caption {
+  color: var(--fmp-text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.chart-body {
+  height: 253px;
+  margin-top: 12px;
 }
 
 .section-label {
@@ -460,7 +463,7 @@ const pieChartData2 = ref([
     flex-direction: column;
   }
 
-  .dashboard-context {
+  .dashboard-actions {
     justify-content: flex-start;
   }
 }

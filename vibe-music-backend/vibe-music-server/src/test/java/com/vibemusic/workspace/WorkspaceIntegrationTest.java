@@ -94,7 +94,8 @@ class WorkspaceIntegrationTest {
                 assertTrue(new org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder().matches("A-private-test-password-123",password));
                 bootstrap.run(null);assertEquals(password,isolated.queryForObject("SELECT password FROM tb_admin",String.class));
                 var migration=new com.vibemusic.config.SchemaMigrationRunner(isolated);migration.run(null);migration.run(null);
-                assertTrue(migration.isReady());assertEquals(2,isolated.queryForObject("SELECT COUNT(*) FROM fmp_schema_history",Integer.class));
+                // 每个迁移脚本只登记一次：当前为初始表、工作区改版、匿名访客三版。
+                assertTrue(migration.isReady());assertEquals(3,isolated.queryForObject("SELECT COUNT(*) FROM fmp_schema_history",Integer.class));
             }finally{isolated.execute("USE test");isolated.execute("DROP DATABASE prod_boot_test");}
             return null;
         });
