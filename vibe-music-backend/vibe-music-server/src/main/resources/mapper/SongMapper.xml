@@ -69,7 +69,7 @@
         a.name AS artistName
         FROM tb_song s
         LEFT JOIN tb_artist a ON s.artist_id = a.id
-        LEFT JOIN tb_user_favorite u ON s.id = u.song_id
+        LEFT JOIN tb_user_favorite u ON s.id = u.song_id AND u.type = 0 AND u.user_id = #{userId}
         WHERE
         <if test="songIds != null and songIds.size() > 0">
             s.media_status = 'active'

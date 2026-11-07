@@ -133,7 +133,8 @@ public interface SongMapper extends BaseMapper<Song> {
                                 @Param("songIds") List<Long> songIds,
                                 @Param("songName") String songName,
                                 @Param("artistName") String artistName,
-                                @Param("album") String album);
+                                @Param("album") String album,
+                                @Param("userId") Long userId);
 
     // 根据用户收藏的歌曲id列表获取歌曲列表
     List<Long> getFavoriteSongStyles(@Param("favoriteSongIds") List<Long> favoriteSongIds);

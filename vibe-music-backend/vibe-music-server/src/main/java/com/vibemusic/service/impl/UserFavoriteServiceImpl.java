@@ -76,7 +76,8 @@ public class UserFavoriteServiceImpl extends ServiceImpl<UserFavoriteMapper, Use
                 favoriteSongIds,
                 songDTO.getSongName(),
                 songDTO.getArtistName(),
-                songDTO.getAlbum()
+                songDTO.getAlbum(),
+                userId
         );
 
         // 遍历结果，设置 likeStatus
@@ -102,8 +103,9 @@ public class UserFavoriteServiceImpl extends ServiceImpl<UserFavoriteMapper, Use
 
         QueryWrapper<UserFavorite> queryWrapper = new QueryWrapper<>();
         queryWrapper.eq("user_id", userId).eq("type", 0).eq("song_id", songId);
+        // 重复收藏是幂等操作：已存在时直接返回成功，避免前端重复点击拿到失败提示。
         if (userFavoriteMapper.selectCount(queryWrapper) > 0) {
-            return Result.error(MessageConstant.ADD + MessageConstant.FAILED);
+            return Result.success(MessageConstant.ADD + MessageConstant.SUCCESS);
         }
 
         UserFavorite userFavorite = new UserFavorite();
@@ -128,8 +130,9 @@ public class UserFavoriteServiceImpl extends ServiceImpl<UserFavoriteMapper, Use
 
         QueryWrapper<UserFavorite> queryWrapper = new QueryWrapper<>();
         queryWrapper.eq("user_id", userId).eq("type", 0).eq("song_id", songId);
+        // 取消收藏同样幂等：本来就没有收藏时返回成功，前端不会收到误导性的失败提示。
         if (userFavoriteMapper.delete(queryWrapper) == 0) {
-            return Result.error(MessageConstant.DELETE + MessageConstant.FAILED);
+            return Result.success(MessageConstant.DELETE + MessageConstant.SUCCESS);
         }
 
         return Result.success(MessageConstant.DELETE + MessageConstant.SUCCESS);

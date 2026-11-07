@@ -121,6 +121,8 @@ const handleLike = async () => {
         sourceSongId: currentTrack.sourceSongId,
         sourceUrlId: currentTrack.sourceUrlId,
         sourcePicId: currentTrack.sourcePicId,
+        sourceExtra: currentTrack.sourceExtra,
+        providerEngine: currentTrack.providerEngine,
         songName: currentTrack.title,
         artistName: currentTrack.artist,
         album: currentTrack.album,
