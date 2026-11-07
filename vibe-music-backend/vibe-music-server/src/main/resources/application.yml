@@ -134,3 +134,7 @@ vibe-music:
   mail:
     # 仅当明确要往本机 Mailpit 投递时才设为 true，否则未配置真实 SMTP 时验证码接口直接报错。
     allow-local-sink: ${FMP_MAIL_ALLOW_LOCAL:false}
+  upload:
+    # 未启用 MinIO 时的本地回退目录，经 /uploads/** 对外访问。
+    dir: ${FMP_UPLOAD_DIR:./.runtime/uploads}
+    public-base-url: ${FMP_PUBLIC_API_URL:http://localhost:18080}
