@@ -4,7 +4,7 @@ import { ElMessage } from 'element-plus'
 import { useLibraryStore } from '@/stores/modules/library'
 import { artistNames, normalizeArtist } from '@/utils/artists'
 import { usePlaybackEvidence } from '@/stores/modules/playbackEvidence'
-import { rememberedGrade } from '@/utils/availabilityProbe'
+import { rememberedGrade, availabilityKey } from '@/utils/availabilityProbe'
 import { useMediaQuery } from '@vueuse/core'
 
 const isPhone = useMediaQuery('(max-width: 767px)')
@@ -13,8 +13,15 @@ const route = useRoute()
 const libraryStore = useLibraryStore()
 const evidence = usePlaybackEvidence()
 const playbackFilter = ref('prefer')
-const showUnavailable = ref(false)
+// 只有用户主动「收起」时才把暂不可播的行移出列表；存的是当时 key 的快照，
+// 之后悬停补探只更新标签，不会让行继续消失或挪位。
+const hiddenBadKeys = ref<string[]>([])
+// 「隐藏已知试听与失败」同样用快照：在搜索周期结束时定格，避免逐条补探造成抖动。
+const noPreviewHiddenKeys = ref<string[]>([])
 let localPageData: any = null
+const keyOf = (song: any) => availabilityKey(song)
+const hiddenBadSet = computed(() => new Set(hiddenBadKeys.value))
+const noPreviewHiddenSet = computed(() => new Set(noPreviewHiddenKeys.value))
 // 悬停补探的结果可能只回填到歌曲对象，这里统一读取，保证筛选和表格标签看到同一等级。
 const gradeOf = (song: any) => rememberedGrade(song) ?? song.availability
 const observedState = (song: any) => evidence.get(song)
@@ -22,33 +29,26 @@ const isKnownUnavailable = (song: any) => observedState(song) === 'unavailable' 
 const isKnownBad = (song: any) =>
   ['preview', 'unavailable'].includes(observedState(song)) || ['preview', 'unavailable'].includes(gradeOf(song))
 const knownUnavailableCount = computed(() => onlineResults.value.filter(isKnownUnavailable).length)
-// 折叠只在仍有条目可显示时生效；如果全部结果都不可播，就保持可见，避免整页空白。
-const collapseApplies = computed(() =>
-  playbackFilter.value === 'prefer' && !showUnavailable.value &&
-  knownUnavailableCount.value > 0 && onlineResults.value.length > knownUnavailableCount.value
-)
-const hiddenUnavailableCount = computed(() => collapseApplies.value ? knownUnavailableCount.value : 0)
+// 播放/探测不再参与可见集合的实时计算：只在搜索周期结束时或用户切换筛选时定格一次。
+const refreshNoPreviewSnapshot = () => {
+  noPreviewHiddenKeys.value = playbackFilter.value === 'no-preview'
+    ? onlineResults.value.filter(isKnownBad).map(keyOf)
+    : []
+}
+const toggleUnavailable = () => {
+  hiddenBadKeys.value = hiddenBadSet.value.size ? [] : onlineResults.value.filter(isKnownUnavailable).map(keyOf)
+}
 const applyRemembered = (songs: any[]) => songs.map(song => {
   const grade = rememberedGrade(song)
   return grade && song.availability !== grade ? { ...song, availability: grade } : song
 })
-const filteredOnline = computed(() => {
-  const songs = onlineResults.value.filter(song => {
-    if (collapseApplies.value && isKnownUnavailable(song)) return false
-    if (playbackFilter.value === 'verified') return observedState(song) === 'full'
-    // 语义：隐藏“已知”试听与不可播；完整性未知的条目保留，悬停补探后再决定去留。
-    if (playbackFilter.value === 'no-preview') return !isKnownBad(song)
-    return true
-  })
-  if (playbackFilter.value !== 'prefer') return songs
-  // 先完整可播，再试听、权益待验证，未知排在后面；已确认不可播的默认折叠。
-  const rank = (song: any) => {
-    const state = observedState(song)
-    const grade = gradeOf(song)
-    return state === 'full' ? 0 : state === 'duration-matched' ? 1 : state === 'preview' || grade === 'preview' ? 2 : song.vip || grade === 'restricted' ? 3 : state === 'unavailable' || grade === 'unavailable' ? 5 : 4
-  }
-  return [...songs].sort((a, b) => rank(a) - rank(b))
-})
+// 始终保持搜索返回的稳定顺序：同一批结果相对顺序固定，播放与探测只更新标签。
+const filteredOnline = computed(() => onlineResults.value.filter(song => {
+  if (hiddenBadSet.value.has(keyOf(song))) return false
+  if (playbackFilter.value === 'verified') return observedState(song) === 'full'
+  if (playbackFilter.value === 'no-preview') return !noPreviewHiddenSet.value.has(keyOf(song))
+  return true
+}))
 
 const props = defineProps({
     selected: {
@@ -86,8 +86,9 @@ const state = reactive({
     pageSizes: [20, 30, 50],
 })
 const updateTable = () => {
-  onlineTotal.value = filteredOnline.value.length
-  state.total = localTotal.value + onlineTotal.value
+  // 顶部计数用搜索返回的原始条数，只增不减；筛选只影响表格与分页总数。
+  onlineTotal.value = onlineResults.value.length
+  state.total = localTotal.value + filteredOnline.value.length
   const offset = (currentPage.value - 1) * pageSize.value
   const source = String(route.query.source || '')
   const localItems = source && source !== 'local' ? [] : localPageData?.items || []
@@ -95,8 +96,11 @@ const updateTable = () => {
   libraryStore.setTableData({ ...localPageData, items: [...localItems, ...filteredOnline.value.slice(onlineOffset, onlineOffset + Math.max(0, pageSize.value - localItems.length))] })
 }
 watch(filteredOnline, () => { if (!loading.value) updateTable() })
-watch(playbackFilter, () => { currentPage.value = 1; if (!loading.value) updateTable() })
-watch(showUnavailable, () => { currentPage.value = 1; if (!loading.value) updateTable() })
+watch(playbackFilter, () => {
+  currentPage.value = 1
+  refreshNoPreviewSnapshot()
+  if (!loading.value) updateTable()
+})
 
 // 监听分页变化
 const handleSizeChange = () => {
@@ -139,8 +143,15 @@ const getSongs = async () => {
       onlineResults.value = []
       onlineQuery.value = ''
       onlineTotal.value = 0
+      hiddenBadKeys.value = []
+      noPreviewHiddenKeys.value = []
     }
     const needsOnlineSearch = Boolean(keyword && onlineQuery.value !== queryKey)
+    // 新的一轮搜索从干净状态开始；同一轮内分页沿用已有的折叠/筛选快照。
+    if (needsOnlineSearch) {
+      hiddenBadKeys.value = []
+      noPreviewHiddenKeys.value = []
+    }
     searchingOnline.value = needsOnlineSearch
     const onlineRequest = needsOnlineSearch
         ? searchOnlineProgressive(keyword, source && source !== 'local' ? [source] : undefined, 50, controller.signal,(songs,states)=>{
@@ -172,7 +183,13 @@ const getSongs = async () => {
     } catch (error: any) {
       if (id === requestId) loadError.value = error?.message || '无法连接音乐服务'
     } finally {
-      if (id === requestId) { searchingOnline.value = false; loading.value = false }
+      if (id === requestId) {
+        searchingOnline.value = false
+        loading.value = false
+        // 一轮搜索结束（含中途失败）后，才按当前已知状态定格「隐藏试听/失败」的集合。
+        refreshNoPreviewSnapshot()
+        updateTable()
+      }
     }
 }
 
@@ -200,24 +217,25 @@ onUnmounted(() => { requestId++; controller?.abort() })
           </div>
           <div v-if="route.query.query" class="text-xs text-muted-foreground">
             本地 {{ localTotal }} 首
-            <span v-if="searchingOnline"> · 正在搜索在线曲库…</span>
+            <span v-if="searchingOnline"> · 正在搜索在线曲库… 已返回 {{ onlineResults.length }} 首</span>
             <span v-else> · 在线补充 {{ onlineTotal }} 首</span>
           </div>
         </div>
         <div v-if="route.query.query" class="mb-4 flex flex-wrap items-center gap-3 text-xs text-muted-foreground max-sm:mb-1 max-sm:gap-2">
           <label for="playback-filter" class="max-sm:hidden">在线结果</label>
           <select id="playback-filter" v-model="playbackFilter" class="min-h-[44px] rounded border border-border bg-background px-3 py-2 text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary max-sm:w-full">
-            <option value="prefer">按本次播放状态排序</option>
+            <option value="prefer">默认顺序（播放与探测不重排）</option>
             <option value="all">全部结果</option>
             <option value="no-preview">隐藏已知试听与失败</option>
             <option value="verified">仅本次已完整播完</option>
           </select>
-          <span v-if="playbackFilter === 'no-preview'" class="max-sm:w-full max-sm:text-[10px] max-sm:leading-4">已隐藏判定为试听或不可播放的在线结果；完整性未知的条目仍会显示，点击或悬停后可补探并自动移除。</span>
-          <span v-else class="max-sm:w-full max-sm:text-[10px] max-sm:leading-4">{{ playbackFilter === 'verified' ? '仅显示本次确实完整播完的在线结果，本地曲库不受影响。' : '完整性未知不等于无法播放；时长匹配表示音频时长一致。' }}</span>
-          <button v-if="playbackFilter === 'prefer' && (hiddenUnavailableCount || showUnavailable)" type="button"
-            class="min-h-[44px] rounded border border-border bg-background px-3 py-2 text-foreground transition hover:bg-muted max-sm:w-full"
-            @click="showUnavailable = !showUnavailable">
-            {{ showUnavailable ? '收起暂不可播结果' : `展开 ${hiddenUnavailableCount} 条暂不可播结果` }}
+          <span v-if="playbackFilter === 'no-preview'" class="max-sm:w-full max-sm:text-[10px] max-sm:leading-4">已在本次搜索结束时定格判定为试听或不可播放的结果；之后补探只更新状态标签，不会让行逐条消失。</span>
+          <span v-else class="max-sm:w-full max-sm:text-[10px] max-sm:leading-4">{{ playbackFilter === 'verified' ? '仅显示本次确实完整播完的在线结果，本地曲库不受影响。' : '保持搜索返回的稳定顺序；悬停、播放与探测只更新状态标签，不移动列表行。' }}</span>
+          <button v-if="playbackFilter === 'prefer' && onlineResults.length" type="button"
+            :disabled="!knownUnavailableCount && !hiddenBadKeys.length"
+            class="min-h-[44px] rounded border border-border bg-background px-3 py-2 text-foreground transition hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 max-sm:w-full"
+            @click="toggleUnavailable">
+            {{ hiddenBadKeys.length ? `展开 ${hiddenBadKeys.length} 条暂不可播结果` : knownUnavailableCount ? `收起 ${knownUnavailableCount} 条暂不可播结果` : '暂无可收起的不可播结果' }}
           </button>
         </div>
         <div v-if="searchingOnline || Object.keys(sourceStates).length" class="mb-3 flex flex-wrap gap-3 text-[11px] text-muted-foreground max-sm:mb-1 max-sm:gap-x-2 max-sm:text-[10px] max-sm:leading-4" role="status"><span v-for="([source,status]) in orderedSourceStates" :key="source" :title="status==='检索失败'?'该平台本次请求失败或超时，不影响其他平台，也不表示所有歌曲不可播放。':status==='无结果'?'该平台本次未返回匹配歌曲。':''">{{ sourceLabels[source] || source }} · {{ status }}</span></div>

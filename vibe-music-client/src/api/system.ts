@@ -1,15 +1,4 @@
 import { http } from '@/utils/http'
-import { searchRank } from '@/utils/searchRanking'
-
-// Verified complete audio is listed first, then trials, restricted entries, unknown last-but-one.
-// Relevance only breaks ties inside the same availability tier.
-const availabilityOrder = (song: any) =>
-  song.availability === 'full' ? 0
-    : song.availability === 'preview' ? 1
-    : song.availability === 'restricted' ? 2
-    : song.availability === 'unavailable' ? 4 : 3
-const rankSongs = (songs: any[], keyword: string) =>
-  songs.sort((a, b) => availabilityOrder(a) - availabilityOrder(b) || searchRank(b, keyword) - searchRank(a, keyword))
 
 export type Result = {
   code: number
@@ -180,20 +169,22 @@ export const searchOnlineProgressive = async (
           throw new Error('source failed')
         successful++
         states[source] = result.data.length ? '已返回' : '无结果'
+        // Map 保留首次插入顺序：后续音源只能追加，已展示的歌不会被挪位；
+        // 播放状态/可播性也不再参与这里的排序。
         for (const song of result.data)
           rows.set(`${song.source}:${song.sourceSongId || song.songId}`, song)
       } catch {
         if (signal.aborted) return
         states[source] = '检索失败'
       }
-      if (!signal.aborted) update(rankSongs([...rows.values()], keyword), { ...states })
+      if (!signal.aborted) update([...rows.values()], { ...states })
     })
   )
   if (signal.aborted) throw new DOMException('Aborted', 'AbortError')
   return {
     code: successful ? 0 : 1,
     message: successful ? '' : '在线来源暂时不可用',
-    data: rankSongs([...rows.values()], keyword),
+    data: [...rows.values()],
   }
 }
 
