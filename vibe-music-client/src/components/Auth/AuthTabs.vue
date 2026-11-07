@@ -34,15 +34,24 @@ const handleClose = () => {
 const handleSwitchTab = (tab: string) => {
   activeTab.value = tab
 }
+
+// 手机键盘弹出后，把获得焦点的输入框滚到弹层可视区域中间，避免被键盘遮挡。
+const handleFocusIn = (event: FocusEvent) => {
+  const target = event.target as HTMLElement | null
+  if (!target || window.innerWidth > 480 || !target.matches('input, textarea')) return
+  window.setTimeout(() => target.scrollIntoView({ block: 'center', behavior: 'smooth' }), 120)
+}
 </script>
 
 <template>
   <el-dialog
     v-model="dialogVisible"
     :title="tabTitles[activeTab]"
-    width="500px"
+    width="min(500px, calc(100vw - 32px))"
+    class="auth-dialog"
     destroy-on-close
     @close="handleClose"
+    @focusin="handleFocusIn"
   >
     <div>
       <el-tabs v-model="activeTab" class="auth-tabs">

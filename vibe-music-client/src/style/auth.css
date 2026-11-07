@@ -90,3 +90,74 @@
 .auth-tabs .el-tabs__header {
   margin-bottom: 8px;
 }
+
+/* 手机端：弹层贴合视口、独立滚动，避免 500px 定宽造成左右裁切 */
+@media (max-width: 480px) {
+  .auth-dialog {
+    display: flex;
+    flex-direction: column;
+    margin: 12px auto;
+    max-height: calc(100dvh - 24px);
+  }
+
+  .auth-dialog .el-dialog__header {
+    flex: none;
+    padding: 16px 16px 4px;
+    margin-right: 0;
+  }
+
+  .auth-dialog .el-dialog__headerbtn {
+    top: 8px;
+    right: 8px;
+    width: 40px;
+    height: 40px;
+  }
+
+  .auth-dialog .el-dialog__body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 8px 16px 16px;
+  }
+
+  .auth-container {
+    max-width: none;
+    padding: 0;
+  }
+
+  .auth-container .el-form-item {
+    margin-bottom: 16px;
+  }
+
+  .form-subtitle {
+    margin-bottom: 16px;
+    font-size: 13px;
+  }
+
+  /* 三个入口等分宽度，文字不换行也不被裁切 */
+  .auth-tabs .el-tabs__nav {
+    width: 100%;
+  }
+
+  .auth-tabs .el-tabs__item {
+    flex: 1;
+    min-width: 0;
+    padding: 0 4px;
+    font-size: 13px;
+    white-space: nowrap;
+    text-align: center;
+  }
+
+  .submit-btn {
+    height: 44px;
+  }
+
+  .forgot-password {
+    margin: -8px 0 12px;
+  }
+
+  .auth-link-text {
+    margin-top: 12px;
+  }
+}
