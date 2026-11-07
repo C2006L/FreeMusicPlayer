@@ -73,7 +73,11 @@ const { play, isPlaying, isBuffering } = useAudioPlayer()
 const selectedId = ref<string | null>(null)
 const handleCoverError = (event: Event) => {
   const image = event.target as HTMLImageElement
-  if (image.src !== defaultAlbum) image.src = defaultAlbum
+  // 单次失败（代理超时/502）不永久锁定占位图：同一地址自动重试一次，
+  // 仍失败才回退默认封面；地址变化后会重新尝试。
+  if (image.src === defaultAlbum || image.src.includes('coverRetry=1')) { image.src = defaultAlbum; return }
+  const original = image.src
+  window.setTimeout(() => { image.src = `${original}${original.includes('?') ? '&' : '?'}coverRetry=1` }, 1500)
 }
 const coverOf = (song: Song) => resolveResourceUrl(song.coverUrl) || defaultAlbum
 
