@@ -62,6 +62,19 @@ test('co-timed Japanese original, romanization and translation become one lyric 
   assert.equal(doc.lines[0].romanization, 'shi n pa i shi ta tte')
   assert.equal(doc.lines[1].time, 20, 'actual later repetition is retained')
 })
+test('co-timed same-language rows stay separate and highlight as one group', () => {
+  const doc = parseLyricDocument({ lyric: '[00:10]第一句\n[00:10]第二句\n[00:14]下一句' })
+  assert.deepEqual(doc.lines.map(l => l.text), ['第一句', '第二句', '下一句'])
+  assert.equal(activeLyricIndex(doc.lines, 10), 0, '同一时间戳从首行开始高亮，而不是只亮最后一行')
+  assert.equal(activeLyricIndex(doc.lines, 12), 0)
+  assert.equal(activeLyricIndex(doc.lines, 14), 2)
+})
+test('an English original and Chinese translation merge even in a file containing Japanese', () => {
+  const doc = parseLyricDocument({ lyric: '[00:05]心配したって\n[00:10]Hello\n[00:10]你好' })
+  assert.equal(doc.lines.length, 2)
+  assert.equal(doc.lines[1].text, 'Hello')
+  assert.equal(doc.lines[1].translation, '你好')
+})
 test('translation alignment tolerates rounding but never reuses lines or pairs by array index', () => {
   const doc = parseLyricDocument({ lyric: '[00:10.188]Hello\n[00:11.000]World\n[00:30]Again', tlyric: '[00:10.18]你好\n[00:11.10]世界\n[00:35]错位' })
   assert.deepEqual(doc.lines.map(l => l.translation), ['你好', '世界', undefined])

@@ -8,7 +8,7 @@ import { LyricTranslationSession } from '@/utils/lyricTranslationSession'
 import { fetchLyrics, findLyrics, startTranslation, translationStatus, cancelTranslation } from '@/api/lyrics'
 import { sameRecording } from '@/utils/playbackPolicy'
 import type { Song } from '@/api/interface'
-const { currentTrack, currentTime, seek } = useAudioPlayer()
+const { currentTrack, currentTime, seek, audioElement } = useAudioPlayer()
 const empty = (): LyricDocument => ({ lines: [], synced: false, source: '', translationSource: '' })
 const document = ref<LyricDocument>(empty()), loading = ref(false), error = ref(''), notice = ref('')
 const offset = ref(0), imported = ref(false), following = ref(true), scrollArea = ref<HTMLElement | null>(null)
@@ -27,7 +27,13 @@ const translating = ref(false), cancellingTranslation = ref(false), translationP
 const translationSession = new LyricTranslationSession((lines: { id: number; text: string }[]) => startTranslation(lines, AbortSignal.timeout(10000)), cancelTranslation)
 let generation = 0, translationGeneration = 0, cancelSequence = 0, cacheUpdated = Date.now(), operation: AbortController | undefined, translationPoll: AbortController | undefined
 let resizeObserver: ResizeObserver | undefined
-const activeIndex = computed(() => document.value.synced ? activeLyricIndex(document.value.lines, currentTime.value - offset.value) : -1)
+// timeupdate 约 4Hz，直接用它算高亮会稳定滞后 0.03–0.28s。这里用 rAF 读音频真实时间，
+// 只在跨越行/字边界时写回 reactive 值，避免每帧重渲染整个列表。
+const clock = ref(0)
+const playhead = computed(() => clock.value - offset.value)
+const activeIndex = computed(() => document.value.synced ? activeLyricIndex(document.value.lines, playhead.value) : -1)
+// 同一时间戳的多行（双语/重复句）属于同一组，整组一起高亮。
+const activeTime = computed(() => activeIndex.value >= 0 ? document.value.lines[activeIndex.value].time : null)
 async function persist() {
   if (!document.value.lines.length) return
   const savedKey = key.value
@@ -49,7 +55,7 @@ async function load(force = false, song?: Song) {
   const signal = operation.signal
   void stopTranslation()
   loading.value = true; searching.value = false; error.value = ''; notice.value = ''; candidates.value = []; following.value = true
-  document.value = empty(); offset.value = 0; imported.value = false; cacheUpdated = Date.now()
+  document.value = empty(); offset.value = 0; imported.value = false; cacheUpdated = Date.now(); clock.value = 0
   const timer = setTimeout(() => { if (operation?.signal === signal) operation.abort() }, 25000)
   try {
     const saved = await readLyrics(savedKey).catch(() => undefined)
@@ -140,7 +146,7 @@ async function importFile(event: Event) {
     if (document.value.lines.length) { try { await ElMessageBox.confirm('用该文件替换当前歌词？仅保存在此浏览器，不上传文件。', '导入歌词') } catch { return } }
     if (savedKey !== key.value) return
     generation++; operation?.abort(); void stopTranslation()
-    document.value = parsed; imported.value = true; cacheUpdated = Date.now(); error.value = ''; loading.value = false; searching.value = false; candidates.value = []; notice.value = ''; following.value = true
+    document.value = parsed; imported.value = true; cacheUpdated = Date.now(); error.value = ''; loading.value = false; searching.value = false; candidates.value = []; notice.value = ''; following.value = true; clock.value = currentTime.value
     await persist(); ElMessage.success('歌词已导入')
   } catch { ElMessage.error('无法读取歌词文件，请检查文件编码') }
 }
@@ -182,23 +188,47 @@ async function translate() {
     }
   }
 }
+function syncPadding() {
+  const area = scrollArea.value
+  // 上下留白必须等于容器高度的一半，否则首句/末句贴边，无法真正居中。
+  if (area) area.style.setProperty('--lyric-pad', `${area.clientHeight / 2}px`)
+}
 async function followCurrent() {
   await nextTick()
   if (!following.value) return
-  const area = scrollArea.value, target = area?.querySelector<HTMLElement>('.lyric-line[data-active="true"]')
-  if (!target || !area) return
-  const top = target.offsetTop - area.clientHeight / 2 + target.offsetHeight / 2
+  const area = scrollArea.value
+  const targets = area ? [...area.querySelectorAll<HTMLElement>('.lyric-line[data-active="true"]')] : []
+  if (!area || !targets.length) return
+  syncPadding()
+  const first = targets[0], last = targets[targets.length - 1]
+  // 同一时间戳多行时按整组包围盒居中，避免只把第一行对准中心。
+  const top = first.offsetTop - area.clientHeight / 2 + (last.offsetTop + last.offsetHeight - first.offsetTop) / 2
   // 已经在中心附近时不重复启动平滑滚动，避免逐字推进时的抖动。
   if (Math.abs(top - area.scrollTop) < 24) return
   area.scrollTo({ top, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
 }
-let followFrame = 0
+let followFrame = 0, clockFrame = 0
 const scheduleFollow = () => { cancelAnimationFrame(followFrame); followFrame = requestAnimationFrame(() => { void followCurrent() }) }
+function tickClock() {
+  const audio = audioElement.value, lines = document.value.lines
+  if (audio && document.value.synced && lines.length) {
+    const index = activeLyricIndex(lines, audio.currentTime - offset.value)
+    const words = index >= 0 && showWords.value && hasWordTiming(lines[index]) ? lines[index].words : undefined
+    // 逐字高亮需要每帧更新；普通整行高亮只在换行时更新。
+    if (words?.length || index !== activeIndex.value) clock.value = audio.currentTime
+  }
+  clockFrame = requestAnimationFrame(tickClock)
+}
 watch([activeIndex, showRoma, showTranslation, showWords], () => { if (following.value) scheduleFollow() })
 const resume = () => { following.value = true; void followCurrent() }
 const seekToLine = (line: TimedLyricLine) => { if (document.value.synced) { seek(Math.max(0, line.time + offset.value)); resume() } }
-onMounted(() => { resizeObserver = new ResizeObserver(() => { if (following.value) scheduleFollow() }); if (scrollArea.value) resizeObserver.observe(scrollArea.value) })
-onUnmounted(() => { cancelAnimationFrame(followFrame); generation++; operation?.abort(); resizeObserver?.disconnect(); void stopTranslation() })
+onMounted(() => {
+  syncPadding()
+  resizeObserver = new ResizeObserver(() => { syncPadding(); if (following.value) scheduleFollow() })
+  if (scrollArea.value) resizeObserver.observe(scrollArea.value)
+  clockFrame = requestAnimationFrame(tickClock)
+})
+onUnmounted(() => { cancelAnimationFrame(followFrame); cancelAnimationFrame(clockFrame); generation++; operation?.abort(); resizeObserver?.disconnect(); void stopTranslation() })
 </script>
 <template>
   <section class="lyrics-panel" aria-label="歌词">
@@ -230,11 +260,11 @@ onUnmounted(() => { cancelAnimationFrame(followFrame); generation++; operation?.
       <div v-else-if="!document.lines.length" class="lyrics-state"><span>当前歌曲暂无歌词</span><p class="empty-hint">可以查找其他来源，或导入本地 LRC / TXT。</p></div>
       <template v-else>
         <button v-for="(line, index) in document.lines" :key="`${line.time}-${index}`" class="lyric-line" :class="{ 'is-plain': !document.synced }"
-          :data-active="index === activeIndex" :aria-current="index === activeIndex ? 'true' : undefined"
+          :data-active="activeTime !== null && line.time === activeTime" :aria-current="activeTime !== null && line.time === activeTime ? 'true' : undefined"
           :aria-label="document.synced ? `跳转到：${line.text}` : undefined" :disabled="!document.synced" @click="seekToLine(line)">
           <span v-if="showWords && hasWordTiming(line)" class="lyric-words">
             <span v-for="(word, wordIndex) in line.words" :key="wordIndex" class="lyric-word"
-              :data-passed="currentTime - offset >= word.time" :data-current="currentTime - offset >= word.time && currentTime - offset < word.end!">{{ word.text }}</span>
+              :data-passed="playhead >= word.time" :data-current="playhead >= word.time && playhead < word.end!">{{ word.text }}</span>
           </span>
           <span v-else>{{ line.text }}</span>
           <small v-if="showRoma && line.romanization" class="lyric-roma">{{ line.romanization }}</small>
@@ -253,7 +283,7 @@ onUnmounted(() => { cancelAnimationFrame(followFrame); generation++; operation?.
 button:hover:not(:disabled){color:hsl(var(--foreground));border-color:var(--primary)}button:focus-visible{outline:2px solid var(--primary);outline-offset:3px}input:focus-visible{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgb(239 111 82 / .12)}button:disabled{opacity:.45;cursor:default}.lyric-toolbar button[aria-pressed=true]{color:var(--primary)}.file-input{display:none}
 .lyric-candidates{display:grid;gap:4px;max-height:160px;overflow-y:auto;margin-top:8px}.lyric-candidates button{text-align:left;padding:7px 8px;border-bottom:1px solid hsl(var(--border));font-size:13px;overflow-wrap:anywhere}.lyric-candidates small{display:block;color:hsl(var(--muted-foreground));font-size:11px}
 .lyric-sync-controls{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding-top:10px;font-size:12px;color:hsl(var(--muted-foreground));flex-shrink:0}.lyric-sync-controls input{width:58px;background:transparent;border:1px solid hsl(var(--border));border-radius:4px;padding:3px 4px;font-variant-numeric:tabular-nums;color:hsl(var(--foreground))}
-.lyrics-scroll{position:relative;min-height:0;flex:1;overflow-y:auto;overflow-x:hidden;padding-block:24px;scrollbar-width:thin;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}@media(max-width:600px){.lyrics-scroll{-webkit-overflow-scrolling:touch;touch-action:pan-y}}.lyrics-scroll.is-synced{padding-block:20vh}
+.lyrics-scroll{position:relative;min-height:0;flex:1;overflow-y:auto;overflow-x:hidden;padding-block:24px;scrollbar-width:thin;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}@media(max-width:600px){.lyrics-scroll{-webkit-overflow-scrolling:touch;touch-action:pan-y}}.lyrics-scroll.is-synced{padding-block:var(--lyric-pad,20vh)}
 .lyric-line{display:block;width:100%;padding:12px 4px;color:hsl(var(--muted-foreground));text-align:left;white-space:normal;overflow-wrap:anywhere;transition:color .18s ease;line-height:1.6}.lyric-line span,.lyric-line small{display:block}.lyric-line span{font-size:18px}.lyric-line small{margin-top:5px;font-size:13px;font-weight:400;opacity:.85}.lyric-line .lyric-roma{font-size:12px;letter-spacing:.02em}.lyric-line[data-active=true]{color:var(--primary);font-weight:650}.lyric-line.is-plain:disabled{opacity:1}.lyrics-state{display:flex;min-height:200px;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:hsl(var(--muted-foreground));font-size:13px;text-align:center}
 .empty-hint{font-size:12px;opacity:.85}
 .lyric-follow-hint{position:absolute;right:24px;bottom:18px;z-index:3;padding:7px 12px;border:0;border-radius:999px;background:var(--primary);color:#111216;font-size:12px;font-weight:600;box-shadow:0 6px 18px rgb(239 111 82 / .28);transition:transform .15s ease,filter .15s ease}

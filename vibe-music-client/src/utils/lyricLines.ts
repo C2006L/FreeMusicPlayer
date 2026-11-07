@@ -70,7 +70,11 @@ export function activeLyricIndex(lines: TimedLyricLine[], time: number) {
     const middle = (low + high) >>> 1
     if (lines[middle].time <= time) { found = middle; low = middle + 1 } else high = middle - 1
   }
-  return found >= 0 && (lines[found].end == null || time < lines[found].end!) ? found : -1
+  if (found < 0) return -1
+  // 同一时间戳可能出现多行（双语对照、未合并的重复句）。二分找到的是最后一行，
+  // 这里回退到该时间戳的首行，避免整组只高亮最后一行。
+  while (found > 0 && lines[found - 1].time === lines[found].time) found--
+  return lines[found].end == null || time < lines[found].end! ? found : -1
 }
 
 // Each auxiliary line is consumed once; never align by array index. Tolerance
@@ -93,11 +97,25 @@ export function parseLyricDocument(payload: LyricPayload): LyricDocument {
   const groups = new Map<number, TimedLyricLine[]>()
   for (const line of parsed) { const group = groups.get(line.time) || []; group.push(line); groups.set(line.time, group) }
   const lines: TimedLyricLine[] = []
-  const japanese = parsed.some(l => kana(l.text)), korean = parsed.some(l => hangul(l.text))
   for (const group of groups.values()) {
-    const original = group.find(l => japanese ? kana(l.text) : korean ? hangul(l.text) : latin(l.text))
-    const translated = group.find(l => l !== original && han(l.text) && !kana(l.text) && !hangul(l.text))
-    const roma = (japanese || korean) ? group.find(l => l !== original && latin(l.text)) : undefined
+    // 按组判断语言，避免整份文件里出现一句日文就把其他组的英文原文 + 中文翻译拆开。
+    const hasKana = group.some(l => kana(l.text)), hasHangul = group.some(l => hangul(l.text))
+    let original: TimedLyricLine | undefined, translated: TimedLyricLine | undefined, roma: TimedLyricLine | undefined
+    if (hasKana || hasHangul) {
+      original = group.find(l => hasKana ? kana(l.text) : hangul(l.text))
+      translated = group.find(l => l !== original && han(l.text) && !kana(l.text) && !hangul(l.text))
+      roma = group.find(l => l !== original && latin(l.text))
+    } else if (group.length === 2) {
+      // 同一时间戳的「原文 + 译文」：一行中文、一行拉丁字母时按文件顺序保留原文，
+      // 其余组合（两行同语种）不动，避免把两句真实歌词误并成译文。
+      const first = group[0], second = group[1]
+      const hanOnly = (text: string) => han(text) && !kana(text) && !hangul(text)
+      if (hanOnly(first.text) !== hanOnly(second.text) && (latin(first.text) || latin(second.text))) {
+        original = first
+        if (hanOnly(second.text)) translated = second
+        else if (latin(second.text)) roma = second
+      }
+    }
     if (original && (translated || roma) && group.every(l => [original, translated, roma].includes(l))) {
       lines.push({ ...original, translation: translated?.text, romanization: roma?.text })
     } else lines.push(...group)
