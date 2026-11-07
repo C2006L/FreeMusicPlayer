@@ -1,7 +1,7 @@
 import http from 'node:http'
 import Meting from '@meting/core'
 import { relevanceScore, matchesSearch } from './search-utils.mjs'
-import { discoverFromPlaylists, discoveryBatch } from './discovery.mjs'
+import { discoverFromPlaylists, discoverPlaylists, discoveryBatch } from './discovery.mjs'
 import { loadBilibiliCollection } from './bilibili-collection.mjs'
 import { SourceRuntime } from './source-runtime.mjs'
 import { proxyPublicCover } from './public-cover.mjs'
@@ -36,6 +36,8 @@ const sourceNames = {
   soda: '汽水音乐',
 }
 const discoveryCache = { expiresAt: 0, songs: [], failedSources: [], offset: 0, pending: null }
+const playlistDiscoveryCache = { expiresAt: 0, playlists: [], failedSources: [], pending: null }
+const coverFallback = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400"><rect width="400" height="400" fill="#e6e2da"/><g fill="#a9a49b"><path d="M258 86v164a44 44 0 1 1-16-34V120l-88 18v124a44 44 0 1 1-16-34V124l120-24z"/></g></svg>')
 const resourceCache = new Map()
 const collectionCache = new Map()
 const streamTargets = new Map()
@@ -334,6 +336,28 @@ const server = http.createServer(async (request, response) => {
     })
   }
 
+  if (request.method === 'GET' && url.pathname === '/playlists') {
+    const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 24, 1), 48)
+    if (!goMusicApiUrl) return sendJson(response, 503, { error: 'playlist discovery requires go-music-api' })
+    const cached = Date.now() < playlistDiscoveryCache.expiresAt
+    if (!cached) {
+      if (!playlistDiscoveryCache.pending) playlistDiscoveryCache.pending = discoverPlaylists(goMusicApiUrl, fetch, 48)
+        .then(result => {
+          playlistDiscoveryCache.playlists = result.playlists
+          playlistDiscoveryCache.failedSources = result.failedSources
+          playlistDiscoveryCache.expiresAt = Date.now() + (result.playlists.length ? 10 * 60 * 1000 : 30000)
+        }).finally(() => { playlistDiscoveryCache.pending = null })
+      try { await playlistDiscoveryCache.pending } catch { return sendJson(response, 503, { error: 'playlist discovery unavailable' }) }
+    }
+    const playlists = playlistDiscoveryCache.playlists.slice(0, limit)
+    if (!playlists.length && playlistDiscoveryCache.failedSources.length === 2) {
+      return sendJson(response, 503, { error: 'playlist discovery unavailable' })
+    }
+    return sendJson(response, 200, {
+      playlists, failedSources: playlistDiscoveryCache.failedSources, cached, origin: 'platform-playlists',
+    })
+  }
+
   if (request.method === 'GET' && url.pathname === '/search') {
     const keyword = (url.searchParams.get('q') || '').trim()
     if (!keyword || keyword.length > 100) {
@@ -464,6 +488,17 @@ const server = http.createServer(async (request, response) => {
       return response.end()
     } catch (error) {
       if (response.headersSent) { response.destroy(); return }
+      if (url.pathname === '/cover') {
+        // A missing upstream cover is not a page error. Return a neutral
+        // placeholder so the card keeps its layout and the console stays clean.
+        response.writeHead(200, {
+          'Content-Type': 'image/svg+xml; charset=utf-8',
+          'Cache-Control': 'private, max-age=60',
+          'X-Content-Type-Options': 'nosniff',
+          'X-Cover-Fallback': '1',
+        })
+        return response.end(coverFallback)
+      }
       return sendJson(response, 502, { error: error instanceof Error ? error.message : 'upstream failed' })
     }
   }

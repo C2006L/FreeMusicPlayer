@@ -2,6 +2,7 @@ package com.vibemusic.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.vibemusic.model.vo.OnlinePlaylistVO;
 import com.vibemusic.model.vo.OnlineSongVO;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -346,6 +347,44 @@ public class OnlineMusicService {
             return result;
         } catch (Exception exception) {
             throw new IllegalStateException("在线音乐服务返回了无效数据", exception);
+        }
+    }
+
+    /**
+     * Recommended playlists come from the provider's real platform feeds. The
+     * client only sees upstream metadata and proxies covers through this host.
+     */
+    public List<OnlinePlaylistVO> discoverPlaylists(int limit) {
+        String uri = UriComponentsBuilder.fromUriString(providerUrl + "/playlists")
+                .queryParam("limit", Math.min(Math.max(limit, 1), 48))
+                .build()
+                .encode()
+                .toUriString();
+        String body = restClient.get().uri(URI.create(uri)).retrieve().body(String.class);
+        try {
+            JsonNode playlists = objectMapper.readTree(body).path("playlists");
+            List<OnlinePlaylistVO> result = new ArrayList<>();
+            for (JsonNode playlist : playlists) {
+                String source = playlist.path("source").asText();
+                String id = playlist.path("id").asText();
+                String name = playlist.path("name").asText();
+                if (!Set.of("netease", "qq").contains(source) || id.isBlank() || name.isBlank()) continue;
+                String cover = playlist.path("coverUrl").asText();
+                result.add(OnlinePlaylistVO.builder()
+                        .id(id)
+                        .name(name)
+                        .coverUrl(cover.isBlank() ? null : buildCoverUrl(source, cover, "", "", cover, "go-music-api"))
+                        .trackCount(playlist.path("trackCount").asLong(0))
+                        .playCount(playlist.path("playCount").asLong(0))
+                        .creator(playlist.path("creator").asText(""))
+                        .source(source)
+                        .sourceName(playlist.path("sourceName").asText(source))
+                        .link(playlist.path("link").asText(""))
+                        .build());
+            }
+            return result;
+        } catch (Exception exception) {
+            throw new IllegalStateException("在线歌单服务返回了无效数据", exception);
         }
     }
 

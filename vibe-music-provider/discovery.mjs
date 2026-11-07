@@ -38,3 +38,54 @@ export const discoveryBatch = (songs, offset, limit) => {
   if (!songs.length) return []
   return Array.from({ length: Math.min(limit, songs.length) }, (_, index) => songs[(offset + index) % songs.length])
 }
+
+const playlistPlatforms = [
+  { source: 'netease', sourceName: '网易云音乐' },
+  { source: 'qq', sourceName: 'QQ音乐' },
+]
+
+// Only expose the platform's own recommendation feed: id, cover, creator and
+// counters come straight from upstream and are never synthesised here.
+export const discoverPlaylists = async (apiBase, fetchImpl = fetch, limit = 24) => {
+  const capped = Math.min(Math.max(Number(limit) || 24, 1), 48)
+  const perSource = Math.max(1, Math.ceil(capped / playlistPlatforms.length))
+  const settled = await Promise.allSettled(playlistPlatforms.map(async (platform) => {
+    const response = await fetchImpl(`${apiBase}/api/v1/playlist/recommend?sources=${platform.source}`, {
+      signal: AbortSignal.timeout(6500),
+      headers: { Accept: 'application/json' },
+    })
+    if (!response.ok) throw new Error(`playlist recommend ${response.status}`)
+    const payload = await response.json()
+    if (!Array.isArray(payload.data)) throw new Error('invalid playlist recommend payload')
+    return payload.data
+      .filter((item) => item.source === platform.source && item.id && item.name)
+      .slice(0, perSource)
+      .map((item) => ({
+        id: String(item.id),
+        name: String(item.name),
+        coverUrl: typeof item.cover === 'string' ? item.cover : '',
+        trackCount: Number(item.track_count) || 0,
+        playCount: Number(item.play_count) || 0,
+        creator: typeof item.creator === 'string' ? item.creator : '',
+        source: platform.source,
+        sourceName: platform.sourceName,
+        link: typeof item.link === 'string' ? item.link : '',
+      }))
+  }))
+  const groups = settled.map((item) => item.status === 'fulfilled' ? item.value : [])
+  const failedSources = playlistPlatforms
+    .filter((_, index) => settled[index].status === 'rejected')
+    .map((platform) => platform.source)
+  const playlists = []
+  const seen = new Set()
+  const longest = Math.max(0, ...groups.map((group) => group.length))
+  for (let index = 0; index < longest; index++) {
+    for (const group of groups) {
+      const item = group[index]
+      if (!item || seen.has(`${item.source}:${item.id}`) || playlists.length >= capped) continue
+      seen.add(`${item.source}:${item.id}`)
+      playlists.push(item)
+    }
+  }
+  return { playlists, failedSources }
+}

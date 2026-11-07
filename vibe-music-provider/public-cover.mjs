@@ -13,6 +13,13 @@ export const publicCoverUrl = raw => {
   const url = new URL(raw)
   if (!['http:','https:'].includes(url.protocol) || url.username || url.password || url.port && !['80','443'].includes(url.port)) throw new Error('invalid cover URL')
   if (['localhost','localhost.localdomain'].includes(url.hostname.toLowerCase()) || isIP(url.hostname.replace(/^\[|\]$/g,'')) && !isPublicAddress(url.hostname.replace(/^\[|\]$/g,''))) throw new Error('private cover URL')
+  // Netease serves full-size originals (often several MB) and its plain HTTP
+  // edges may redirect to private CDN addresses. Use HTTPS and ask for a
+  // card-sized variant instead of downloading the original.
+  if (url.hostname.endsWith('music.126.net')) {
+    url.protocol = 'https:'
+    if (!url.searchParams.has('param')) url.searchParams.set('param', '400y400')
+  }
   return url
 }
 // Validate each redirect and pin the DNS result to the actual connection.
@@ -32,7 +39,7 @@ export const proxyPublicCover = async (raw, response, depth = 0) => {
   })
   if (upstream.statusCode>=300 && upstream.statusCode<400 && upstream.headers.location) {upstream.destroy();return proxyPublicCover(new URL(upstream.headers.location,url).href,response,depth+1)}
   const type=String(upstream.headers['content-type']||'').split(';')[0]
-  if (upstream.statusCode!==200 || !/^image\/(jpeg|png|webp|gif|avif|bmp)$/i.test(type) || Number(upstream.headers['content-length']||0)>5*1024*1024) {upstream.destroy();throw new Error('invalid image response')}
+  if (upstream.statusCode!==200 || !/^image\/(jpeg|jpg|png|webp|gif|avif|bmp)$/i.test(type) || Number(upstream.headers['content-length']||0)>5*1024*1024) {upstream.destroy();throw new Error('invalid image response')}
   response.writeHead(200,{'Content-Type':type,'Cache-Control':'private, max-age=300','X-Content-Type-Options':'nosniff'})
   await new Promise((resolve,reject)=>{
     let bytes=0

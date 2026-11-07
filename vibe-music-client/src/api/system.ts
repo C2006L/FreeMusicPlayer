@@ -251,6 +251,16 @@ export const getPlaylistDetail = (id: number) => {
   return http<Result>('get', `/playlist/getPlaylistDetail/${id}`)
 }
 
+/** 平台真实推荐歌单（数据库无可用歌单时用于首屏） */
+export const getOnlinePlaylists = (limit = 24) => {
+  return http<Result>('get', '/playlist/discoverOnline', { params: { limit } })
+}
+
+/** 在线歌单曲目，仅供播放，不写入本地歌单 */
+export const getOnlinePlaylistSongs = (source: string, id: string) => {
+  return http<Result>('get', '/playlist/onlineDetail', { params: { source, id } })
+}
+
 /** 获取用户收藏的歌曲 */
 export const getFavoriteSongs = (data: object) => {
   return http<Result>('post', '/favorite/getFavoriteSongs', { data })

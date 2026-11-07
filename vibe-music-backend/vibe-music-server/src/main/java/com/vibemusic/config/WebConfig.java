@@ -31,6 +31,7 @@ public class WebConfig implements WebMvcConfigurer {
                         "/health",
                         "/banner/getBannerList",
                         "/playlist/getAllPlaylists", "/playlist/getRecommendedPlaylists", "/playlist/getPlaylistDetail/**",
+                        "/playlist/discoverOnline", "/playlist/onlineDetail",
                         "/artist/getAllArtists", "/artist/getArtistDetail/**",
                         "/song/getAllSongs", "/song/getRecommendedSongs", "/song/getSongDetail/**",
                         "/song/discoverOnline", "/song/bilibiliCollection",
