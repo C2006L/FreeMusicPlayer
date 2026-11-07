@@ -10,7 +10,16 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$projectRoot = Split-Path -Parent $PSScriptRoot
+# Resolve the scripts directory defensively: $PSScriptRoot is empty when the
+# file is dot-sourced or started by an unusual host. Never pass an empty value
+# to Split-Path, Join-Path or Test-Path.
+$scriptRoot = $PSScriptRoot
+if (-not $scriptRoot -and $MyInvocation.MyCommand.Path) {
+    $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+}
+if (-not $scriptRoot) { throw 'Cannot resolve the scripts directory; run this script from its file path.' }
+$projectRoot = Split-Path -Parent $scriptRoot
+if (-not $projectRoot) { throw "Cannot resolve the project root from '$scriptRoot'." }
 $runtimeRoot = Join-Path $projectRoot '.runtime'
 $logRoot = Join-Path $runtimeRoot 'logs'
 $pidRoot = Join-Path $runtimeRoot 'pids'
@@ -29,6 +38,16 @@ if (-not (Test-Path $jwtSecretFile)) {
     [System.IO.File]::WriteAllText($jwtSecretFile, [Convert]::ToBase64String($secretBytes))
 }
 $env:VIBE_MUSIC_JWT_SECRET = ([System.IO.File]::ReadAllText($jwtSecretFile)).Trim()
+# Real SMTP credentials live in .runtime/mail.env (ignored by .gitignore).
+# When the file is absent, application.yml defaults (local Mailpit) stay active.
+$mailEnvFile = Join-Path $runtimeRoot 'mail.env'
+if (Test-Path $mailEnvFile) {
+    Get-Content $mailEnvFile | ForEach-Object {
+        if ($_ -match '^([A-Z0-9_]+)=(.*)$') {
+            Set-Item -Path "env:$($matches[1])" -Value $matches[2]
+        }
+    }
+}
 $backendPort = if ($env:FMP_BACKEND_PORT) { [int]$env:FMP_BACKEND_PORT } else { 18080 }
 # Phone/tablet access: set FMP_PUBLIC_HOST to this machine's LAN IP. Existing
 # VITE_APP_BASE_API / VIBE_MUSIC_PROVIDER_PUBLIC_URL values are never overwritten,
@@ -122,7 +141,7 @@ function Stop-ManagedProcess([string]$Name) {
 if ($Tunnel) {
     # Tunnels are started first so their random public URLs can be applied to
     # the client bundle, the backend media URLs and the CORS allow-list.
-    & (Join-Path $PSScriptRoot 'tunnel-dev.ps1')
+    & (Join-Path $scriptRoot 'tunnel-dev.ps1')
     $tunnelEnv = Join-Path $runtimeRoot 'tunnel.env'
     if (-not (Test-Path $tunnelEnv)) {
         throw 'Tunnel URLs were not written to .runtime/tunnel.env.'
@@ -152,7 +171,7 @@ if (-not $Tunnel) {
     $tunnelEnv = Join-Path $runtimeRoot 'tunnel.env'
     if (Test-Path $tunnelEnv) {
         Write-Host 'Stopping leftover tunnels for local mode ...'
-        & (Join-Path $PSScriptRoot 'tunnel-dev.ps1') -Stop
+        & (Join-Path $scriptRoot 'tunnel-dev.ps1') -Stop
     }
 }
 $previousMode = if (Test-Path $modeFile) { (Get-Content $modeFile -Raw).Trim() } else { '' }
@@ -195,8 +214,11 @@ if ($WithMinio) { Wait-Port 9000 }
 if ($WithMail) {
     $dockerExit = Invoke-Docker @('compose', '-f', $composeFile, '--profile', 'mail', 'up', '-d', 'mailpit')
     if ($dockerExit -ne 0) { throw 'Local test mailbox failed to start.' }
-    # 本机 Mailpit 只用于开发调试。默认不允许往本机接收器投递（验证码接口会直接报错），
-    # 显式加上 -WithMail 才放宽，验证码可在 http://localhost:8025 查看。
+    # Mailpit is a local test mailbox. Delivery to a local sink is blocked by
+    # default (the verification-code endpoint refuses it); -WithMail relaxes
+    # that so codes can be read at http://localhost:8025.
+    # Keep script comments ASCII: Windows PowerShell 5.1 decodes BOM-less
+    # UTF-8 files as ANSI, and non-ASCII text can corrupt the next statements.
     $env:FMP_MAIL_ALLOW_LOCAL = 'true'
 }
 

@@ -6,7 +6,16 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$projectRoot = Split-Path -Parent $PSScriptRoot
+# Same defensive root resolution as scripts/start-dev.ps1: $PSScriptRoot can be
+# empty when this file is dot-sourced, and an empty value must never reach
+# Split-Path, Join-Path or Test-Path.
+$scriptRoot = $PSScriptRoot
+if (-not $scriptRoot -and $MyInvocation.MyCommand.Path) {
+    $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+}
+if (-not $scriptRoot) { throw 'Cannot resolve the scripts directory; run this script from its file path.' }
+$projectRoot = Split-Path -Parent $scriptRoot
+if (-not $projectRoot) { throw "Cannot resolve the project root from '$scriptRoot'." }
 $runtimeRoot = Join-Path $projectRoot '.runtime'
 $logRoot = Join-Path $runtimeRoot 'logs'
 $pidRoot = Join-Path $runtimeRoot 'pids'
