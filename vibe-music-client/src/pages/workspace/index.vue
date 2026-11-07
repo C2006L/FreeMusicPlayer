@@ -28,7 +28,12 @@ const link = ref(''),
   requestKey = ref(createUuid())
 let alive = true,
   timer: ReturnType<typeof setInterval> | undefined,
-  controller: AbortController | undefined
+  controller: AbortController | undefined,
+  lastRefresh = 0
+// 只有排队/执行中的任务需要高频刷新；空闲时降频，避免空转请求。
+const hasActiveJobs = computed(() =>
+  jobs.value.some((job) => ['QUEUED', 'RUNNING'].includes(job.status))
+)
 const labels: Record<string, string> = {
   QUEUED: '等待执行',
   RUNNING: '执行中',
@@ -48,8 +53,11 @@ watch(
 )
 const choose = (value: string) =>
   router.replace({ path: '/workspace', query: { tab: value } })
-const refresh = async () => {
+const refresh = async (force = false) => {
   if (!user.isLoggedIn || loading.value) return
+  if (!force && !hasActiveJobs.value && Date.now() - lastRefresh < 5000)
+    return
+  lastRefresh = Date.now()
   const owner = user.userInfo.userId
   loading.value = true
   error.value = ''
@@ -82,7 +90,7 @@ const submit = async () => {
     })
     ElMessage.success('任务已创建，重复提交会返回原任务')
     await choose('tasks')
-    await refresh()
+    await refresh(true)
   } catch (e: any) {
     ElMessage.error(e.message)
   } finally {
@@ -173,10 +181,11 @@ watch(
     detailsVisible.value = false
     if (timer) clearInterval(timer)
     if (user.isLoggedIn) {
-      void refresh()
+      void refresh(true)
+      // 有活跃任务时 1.5 秒轮询到终态（即使页面在后台也继续），空闲时 5 秒一次。
       timer = setInterval(() => {
-        if (!document.hidden) void refresh()
-      }, 5000)
+        if (hasActiveJobs.value || !document.hidden) void refresh()
+      }, 1500)
     }
   },
   { immediate: true }
@@ -199,7 +208,7 @@ onUnmounted(() => {
         </p>
         <h1 class="text-2xl font-semibold mt-1">我的音乐工作区</h1>
       </div>
-      <button :disabled="loading" class="text-sm text-primary" @click="refresh">
+      <button :disabled="loading" class="text-sm text-primary" @click="refresh(true)">
         {{ loading ? '刷新中…' : '刷新数据' }}
       </button>
     </header>
