@@ -180,13 +180,13 @@ const handleLike = async () => {
         :aria-label="playbackRequested ? '暂停' : '播放'"
         :aria-busy="loadingPlayback"
       >
-        <span class="play-state" :data-active="!playbackRequested">
-          <Icon icon="material-symbols:play-circle" class="text-3xl" />
-        </span>
-        <span class="play-state" :data-active="playbackRequested">
-          <Icon icon="ic:round-pause-circle" class="text-3xl" />
-        </span>
         <span v-if="loadingPlayback" class="play-spinner" aria-hidden="true" />
+        <span v-else class="play-state" aria-hidden="true">
+          <Icon
+            :icon="playbackRequested ? 'ic:round-pause-circle' : 'material-symbols:play-circle'"
+            class="text-3xl"
+          />
+        </span>
       </button>
       <button
         @click="nextTrack"
@@ -249,11 +249,9 @@ const handleLike = async () => {
 .play-button:hover { filter: brightness(1.07); transform: scale(1.06); box-shadow: 0 7px 18px rgb(239 111 82 / .26); }
 .play-button:active { filter: brightness(.96); transform: scale(.95); transition-duration: .09s; }
 .play-button:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
-/* 播放/暂停图标交叉淡入 + 轻微缩放，避免瞬间跳变 */
-.play-state { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; transform: scale(.86); transition: opacity .16s ease, transform .24s cubic-bezier(.22,.61,.36,1); pointer-events: none; }
-.play-state[data-active='true'] { opacity: 1; transform: scale(1); }
-.play-button.is-loading .play-state { opacity: .4; }
-.play-spinner { position: absolute; width: 18px; height: 18px; border: 2px solid rgb(17 18 22 / .22); border-top-color: #111216; border-radius: 50%; animation: play-spin .75s linear infinite; }
+/* 同一时刻只渲染一个图标；缓冲/换源时只渲染转圈，避免叠层糊在一起。 */
+.play-state { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+.play-spinner { position: absolute; width: 20px; height: 20px; border: 2px solid rgb(17 18 22 / .28); border-top-color: #111216; border-radius: 50%; animation: play-spin .75s linear infinite; }
 @keyframes play-spin { to { transform: rotate(360deg); } }
 .favorite-button { margin-left: 4px; }
 .progress-row { display: flex; min-width: 0; align-items: center; gap: 10px; }
