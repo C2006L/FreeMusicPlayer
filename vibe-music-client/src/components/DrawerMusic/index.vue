@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import Left from './left.vue'
 import Right from './right.vue'
+import Progress from './progress.vue'
 import { useDark, useToggle } from '@vueuse/core'
 import { useDateFormat, useNow } from '@vueuse/core'
 import { getSongDetail } from '@/api/system'
@@ -76,18 +77,21 @@ provide('songDetail', songDetail)
     class="now-playing-drawer"
   >
     <template #header>
-      <div class="flex items-center justify-between">
-        <div
-          class="flex items-center justify-center gap-2 text-primary-foreground"
-        >
-          <el-button text circle @click="showDrawer = false">
-            <icon-uiw:down />
-          </el-button>
+      <div class="drawer-head">
+        <div class="flex items-center justify-between">
+          <div
+            class="flex items-center justify-center gap-2 text-primary-foreground"
+          >
+            <el-button text circle @click="showDrawer = false">
+              <icon-uiw:down />
+            </el-button>
+          </div>
+          <div class="drawer-clock flex items-center gap-1">
+            <icon-meteor-icons:clock />
+            <span class="text-base"> {{ formatted }} </span>
+          </div>
         </div>
-        <div class="flex items-center gap-1">
-          <icon-meteor-icons:clock />
-          <span class="text-base"> {{ formatted }} </span>
-        </div>
+        <Progress />
       </div>
     </template>
     <main class="drawer-content h-full">
@@ -111,6 +115,7 @@ provide('songDetail', songDetail)
 </template>
 
 <style scoped>
+.drawer-head { display:flex; flex-direction:column; gap:2px; width:100%; }
 .drawer-content { display:grid; grid-template-columns:minmax(420px,.9fr) minmax(440px,1.1fr); overflow:hidden; }
 .player-pane,.lyrics-pane { min-width:0; min-height:0; }.player-pane { border-right:1px solid hsl(var(--border)); }
 :global(.now-playing-drawer.el-drawer) { background:hsl(var(--background)); color:hsl(var(--foreground)); }
@@ -118,6 +123,10 @@ provide('songDetail', songDetail)
 :global(.now-playing-drawer .el-drawer__body) { min-height:0; padding:0; overflow:hidden; }
 :global(.now-playing-drawer .el-drawer__footer) { padding:8px 22px calc(8px + env(safe-area-inset-bottom, 0px)); border-top:1px solid hsl(var(--border)); }
 @media(max-width:900px){.drawer-content{grid-template-columns:1fr}.player-pane{display:none}.lyrics-pane{height:100%}}
+@media(max-width:900px){
+  :global(.now-playing-drawer .el-drawer__header){height:auto;padding-block:4px 8px}
+  .drawer-clock{display:none}
+}
 @media(max-width:767px){
   :global(.now-playing-drawer .el-drawer__header){padding-inline:10px}
   :global(.now-playing-drawer .el-drawer__header .el-button){width:44px;height:44px}

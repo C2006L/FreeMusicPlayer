@@ -8,7 +8,7 @@ import { LyricTranslationSession } from '@/utils/lyricTranslationSession'
 import { fetchLyrics, findLyrics, startTranslation, translationStatus, cancelTranslation } from '@/api/lyrics'
 import { sameRecording } from '@/utils/playbackPolicy'
 import type { Song } from '@/api/interface'
-const { currentTrack, currentTime, seek, audioElement } = useAudioPlayer()
+const { currentTrack, currentTime, seek, audioElement, isSeeking, seekingTime } = useAudioPlayer()
 const empty = (): LyricDocument => ({ lines: [], synced: false, source: '', translationSource: '' })
 const document = ref<LyricDocument>(empty()), loading = ref(false), error = ref(''), notice = ref('')
 const offset = ref(0), imported = ref(false), following = ref(true), scrollArea = ref<HTMLElement | null>(null)
@@ -30,7 +30,8 @@ let resizeObserver: ResizeObserver | undefined
 // timeupdate 约 4Hz，直接用它算高亮会稳定滞后 0.03–0.28s。这里用 rAF 读音频真实时间，
 // 只在跨越行/字边界时写回 reactive 值，避免每帧重渲染整个列表。
 const clock = ref(0)
-const playhead = computed(() => clock.value - offset.value)
+// 拖动顶部进度条时用预览时间，歌词行随拖动实时跟随；松手后再以音频真实时间为准。
+const playhead = computed(() => (isSeeking.value ? seekingTime.value : clock.value) - offset.value)
 const activeIndex = computed(() => document.value.synced ? activeLyricIndex(document.value.lines, playhead.value) : -1)
 // 同一时间戳的多行（双语/重复句）属于同一组，整组一起高亮。
 const activeTime = computed(() => activeIndex.value >= 0 ? document.value.lines[activeIndex.value].time : null)
@@ -214,8 +215,8 @@ function tickClock() {
   if (audio && document.value.synced && lines.length) {
     const index = activeLyricIndex(lines, audio.currentTime - offset.value)
     const words = index >= 0 && showWords.value && hasWordTiming(lines[index]) ? lines[index].words : undefined
-    // 逐字高亮需要每帧更新；普通整行高亮只在换行时更新。
-    if (words?.length || index !== activeIndex.value) clock.value = audio.currentTime
+    // 逐字高亮需要每帧更新；普通整行高亮只在换行时更新；拖动/跳转后时钟需追上音频。
+    if (words?.length || index !== activeIndex.value || Math.abs(audio.currentTime - clock.value) > 1.5) clock.value = audio.currentTime
   }
   clockFrame = requestAnimationFrame(tickClock)
 }
