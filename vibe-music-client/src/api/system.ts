@@ -202,6 +202,11 @@ export const discoverOnlineSongs = (limit = 20) => {
   return http<Result>('get', '/song/discoverOnline', { params: { limit } })
 }
 
+/** 歌手发现首屏：跨多份平台推荐歌单聚合出的真实歌手与曲目数 */
+export const getDiscoverArtists = (limit = 60) => {
+  return http<Result>('get', '/artist/discoverOnline', { params: { limit }, timeout: 30000 })
+}
+
 /** 获取 B 站完整分 P / 合集目录 */
 export const getBilibiliCollection = (bvid: string, signal?: AbortSignal) =>
   http<Result>('get', '/song/bilibiliCollection', {

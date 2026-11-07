@@ -2,6 +2,7 @@ package com.vibemusic.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.vibemusic.model.vo.OnlineArtistVO;
 import com.vibemusic.model.vo.OnlinePlaylistVO;
 import com.vibemusic.model.vo.OnlineSongVO;
 import org.springframework.beans.factory.annotation.Value;
@@ -388,9 +389,53 @@ public class OnlineMusicService {
         }
     }
 
+    /**
+     * 歌手卡片的数据来自 provider 跨多份平台推荐歌单的聚合结果。
+     * songCount 是去重后的真实候选曲目数，封面仍由本机代理转发。
+     */
+    public List<OnlineArtistVO> discoverArtists(int limit) {
+        String uri = UriComponentsBuilder.fromUriString(providerUrl + "/artists")
+                .queryParam("limit", Math.min(Math.max(limit, 1), 120))
+                .build()
+                .encode()
+                .toUriString();
+        String body = collectionClient.get().uri(URI.create(uri)).retrieve().body(String.class);
+        try {
+            JsonNode artists = objectMapper.readTree(body).path("artists");
+            List<OnlineArtistVO> result = new ArrayList<>();
+            for (JsonNode artist : artists) {
+                String name = artist.path("name").asText();
+                String source = artist.path("source").asText();
+                String coverSource = artist.path("coverSource").asText(source);
+                String cover = artist.path("coverUrl").asText();
+                if (name.isBlank() || !ALLOWED_SOURCES.contains(source)) continue;
+                List<String> sources = new ArrayList<>();
+                for (JsonNode item : artist.path("sources")) {
+                    String value = item.asText();
+                    if (!value.isBlank()) sources.add(value);
+                }
+                result.add(OnlineArtistVO.builder()
+                        .name(name)
+                        .songCount(artist.path("songCount").asLong(0))
+                        .coverUrl(cover.isBlank() ? null : buildCoverUrl(
+                                ALLOWED_SOURCES.contains(coverSource) ? coverSource : source,
+                                cover, "", "", cover, "go-music-api"))
+                        .sampleSongName(artist.path("sampleSongName").asText(""))
+                        .source(source)
+                        .sourceName(artist.path("sourceName").asText(source))
+                        .sources(sources)
+                        .build());
+            }
+            return result;
+        } catch (Exception exception) {
+            throw new IllegalStateException("在线歌手服务返回了无效数据", exception);
+        }
+    }
+
     public String buildStreamUrl(String source, String id) {
         return resourceUrl("stream", source, id);
     }
+
     /** Persist stable identifiers; rebuild the API entry points when a private collection is read. */
     public OnlineSongVO refreshResourceUrls(OnlineSongVO song) {
         if (!ALLOWED_SOURCES.contains(song.getSource()) || song.getSourceSongId() == null)

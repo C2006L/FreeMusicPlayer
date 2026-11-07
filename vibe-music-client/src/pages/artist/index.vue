@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { discoverOnlineSongs, searchOnlineSongs } from '@/api/system'
+import { getDiscoverArtists, searchOnlineSongs } from '@/api/system'
 import type { Song } from '@/api/interface'
 import { normalizeArtist, relatedArtists, type RelatedArtist } from '@/utils/artists'
 import MusicCover from '@/components/MusicCover.vue'
@@ -7,12 +7,21 @@ import { useMediaQuery } from '@vueuse/core'
 
 const isPhone = useMediaQuery('(max-width: 767px)')
 
-type ArtistCard = RelatedArtist & { sources: string[]; primaryCount: number }
-// The upstream aggregation keeps one entry per platform. Cards merge the same
-// display name so a search for one artist does not stack five identical tiles.
+type ArtistCard = {
+  key: string
+  name: string
+  source: string
+  sourceName: string
+  count: number
+  coverUrl: string
+  sampleSongName: string
+  sources: string[]
+}
+// The upstream aggregation keeps one entry per platform. Search cards merge the
+// same display name so one artist does not stack five identical tiles.
 const groupArtists = (artists: RelatedArtist[], query = ''): ArtistCard[] => {
   const needle = normalizeArtist(query)
-  const map = new Map<string, ArtistCard>()
+  const map = new Map<string, ArtistCard & { primaryCount: number }>()
   for (const artist of artists) {
     const key = normalizeArtist(artist.name)
     const existing = map.get(key)
@@ -24,20 +33,35 @@ const groupArtists = (artists: RelatedArtist[], query = ''): ArtistCard[] => {
         existing.primaryCount = artist.count
         existing.source = artist.source
         existing.sourceName = artist.sourceName
+        existing.sampleSongName = artist.sampleSongName || existing.sampleSongName
       }
     } else {
-      map.set(key, { ...artist, key, sources: [artist.sourceName], primaryCount: artist.count })
+      map.set(key, {
+        key,
+        name: artist.name,
+        source: artist.source,
+        sourceName: artist.sourceName,
+        count: artist.count,
+        coverUrl: artist.coverUrl,
+        sampleSongName: artist.sampleSongName,
+        sources: [artist.sourceName],
+        primaryCount: artist.count,
+      })
     }
   }
-  return [...map.values()].sort((a, b) => Number(normalizeArtist(b.name) === needle) - Number(normalizeArtist(a.name) === needle) || b.count - a.count)
+  return [...map.values()].sort(
+    (a, b) => Number(normalizeArtist(b.name) === needle) - Number(normalizeArtist(a.name) === needle) || b.count - a.count
+  )
 }
 
+const discoveryPageSize = 24
 const router = useRouter()
 const route = useRoute()
 const searchKeyword = ref(String(route.query.query || ''))
 const submitted = ref('')
 const searchArtists = ref<ArtistCard[]>([])
-const discoveredSongs = ref<Song[]>([])
+const discoveryArtists = ref<ArtistCard[]>([])
+const discoveryOffset = ref(0)
 const discoveryLoading = ref(false)
 const discoveryError = ref('')
 const searchLoading = ref(false)
@@ -48,36 +72,68 @@ const searchInput = ref<HTMLInputElement>()
 let requestId = 0
 let discoveryId = 0
 let controller: AbortController | undefined
+let inputTimer: ReturnType<typeof setTimeout> | undefined
+let composing = false
 
-const discoveryArtists = computed(() => groupArtists(relatedArtists(discoveredSongs.value, '')).slice(0, 24))
+const discoveryPage = computed(() => {
+  const all = discoveryArtists.value
+  if (!all.length) return []
+  const start = discoveryOffset.value % all.length
+  return [...all.slice(start), ...all.slice(0, start)].slice(0, discoveryPageSize)
+})
 const pagedArtists = computed(() => searchArtists.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value))
 const searchActive = computed(() => Boolean(submitted.value))
 const loading = computed(() => searchActive.value ? searchLoading.value : discoveryLoading.value)
 const error = computed(() => searchActive.value ? searchError.value : discoveryError.value)
-const visibleArtists = computed(() => searchActive.value ? pagedArtists.value : discoveryArtists.value)
+const visibleArtists = computed(() => searchActive.value ? pagedArtists.value : discoveryPage.value)
 const summary = computed(() => searchActive.value
   ? `${searchArtists.value.length} 位相关歌手`
-  : `${discoveryArtists.value.length} 位歌手 · 来自本批平台推荐`)
+  : `${discoveryArtists.value.length} 位歌手 · 来自多份平台推荐歌单`)
+
+const toArtistCard = (raw: any): ArtistCard => {
+  const name = String(raw?.name || '').trim()
+  const source = String(raw?.source || '')
+  const sourceName = String(raw?.sourceName || source)
+  return {
+    key: normalizeArtist(name),
+    name,
+    source,
+    sourceName,
+    count: Number(raw?.songCount) || 0,
+    coverUrl: String(raw?.coverUrl || ''),
+    sampleSongName: String(raw?.sampleSongName || ''),
+    sources: Array.isArray(raw?.sources) && raw.sources.length ? raw.sources.map(String) : [sourceName],
+  }
+}
 
 const loadDiscovery = async () => {
   const id = ++discoveryId
   discoveryLoading.value = true
   discoveryError.value = ''
   try {
-    const result = await discoverOnlineSongs(30)
+    const result = await getDiscoverArtists(60)
     if (id !== discoveryId) return
     if (result.code !== 0 || !Array.isArray(result.data)) throw new Error(result.message || '在线歌手暂时不可用')
-    discoveredSongs.value = result.data
+    discoveryArtists.value = (result.data as any[]).map(toArtistCard).filter((artist) => artist.name)
+    discoveryOffset.value = 0
   } catch (e: any) {
     if (id !== discoveryId) return
-    discoveredSongs.value = []
+    discoveryArtists.value = []
     discoveryError.value = e?.message || '在线音源暂时无法连接'
   } finally {
     if (id === discoveryId) discoveryLoading.value = false
   }
 }
 
+const clearInputTimer = () => {
+  if (inputTimer) {
+    clearTimeout(inputTimer)
+    inputTimer = undefined
+  }
+}
+
 const search = async (value = searchKeyword.value) => {
+  clearInputTimer()
   controller?.abort()
   const id = ++requestId
   searchKeyword.value = value
@@ -86,7 +142,7 @@ const search = async (value = searchKeyword.value) => {
   currentPage.value = 1
   searchError.value = ''
   if (!submitted.value) {
-    if (!discoveredSongs.value.length && !discoveryLoading.value) void loadDiscovery()
+    if (!discoveryArtists.value.length && !discoveryLoading.value) void loadDiscovery()
     return
   }
   searchLoading.value = true
@@ -103,14 +159,45 @@ const search = async (value = searchKeyword.value) => {
   }
 }
 
+// Typing now refreshes results after a short pause, so the list can no longer
+// disagree with a filled-in search box. Enter and the search button still run
+// immediately, and IME composition never searches intermediate pinyin.
+const scheduleLiveSearch = () => {
+  clearInputTimer()
+  inputTimer = setTimeout(() => {
+    inputTimer = undefined
+    if (searchKeyword.value.trim() === submitted.value) return
+    void search()
+  }, 350)
+}
+const onSearchInput = () => { if (!composing) scheduleLiveSearch() }
+const onCompositionStart = () => { composing = true }
+const onCompositionEnd = () => {
+  composing = false
+  scheduleLiveSearch()
+}
+
+const nextDiscoveryBatch = () => {
+  if (!discoveryArtists.value.length) {
+    void loadDiscovery()
+    return
+  }
+  discoveryOffset.value = (discoveryOffset.value + discoveryPageSize) % discoveryArtists.value.length
+}
 const resetSearch = () => search('')
 const retry = () => searchActive.value ? search(submitted.value) : loadDiscovery()
 const focusSearch = () => nextTick(() => searchInput.value?.focus())
 const artistMeta = (artist: ArtistCard) => {
-  const parts = [`${artist.count} 首`]
-  if (artist.sampleSongName) parts.push(artist.sampleSongName)
+  const parts: string[] = []
+  if (searchActive.value) {
+    if (artist.count > 1) parts.push(`本次匹配 ${artist.count} 首`)
+    if (artist.sampleSongName) parts.push(artist.count > 1 ? artist.sampleSongName : `匹配：${artist.sampleSongName}`)
+  } else {
+    if (artist.count > 1) parts.push(`${artist.count} 首`)
+    if (artist.sampleSongName) parts.push(artist.count > 1 ? artist.sampleSongName : `代表作：${artist.sampleSongName}`)
+  }
   if (artist.sources.length > 1) parts.push(`${artist.sources.length} 个平台`)
-  return parts.join(' · ')
+  return parts.filter(Boolean).join(' · ') || artist.sourceName
 }
 const openArtist = (artist: ArtistCard) => router.push({ path: '/library', query: { query: artist.name, artist: artist.name, source: artist.source } })
 
@@ -123,6 +210,7 @@ onUnmounted(() => {
   requestId++
   discoveryId++
   controller?.abort()
+  clearInputTimer()
 })
 </script>
 
@@ -132,11 +220,20 @@ onUnmounted(() => {
       <div class="artist-heading">
         <p class="eyebrow">ARTISTS</p>
         <h1>歌手发现</h1>
-        <p class="description">从平台真实推荐歌单聚合本批可检索的歌手，点击进入相关歌曲。这里展示的是本批歌曲的署名聚合，不是完整歌手档案。</p>
+        <p class="description">从平台多份推荐歌单跨来源聚合本批可检索的歌手，曲目数是跨歌单去重后的真实候选数。这里展示的是推荐歌单里的署名聚合，不是完整歌手档案。</p>
       </div>
       <form class="artist-search" @submit.prevent="search()">
         <label class="sr-only" for="artist-query">搜索歌手</label>
-        <input id="artist-query" ref="searchInput" v-model="searchKeyword" placeholder="输入歌手或乐队名称" maxlength="100" />
+        <input
+          id="artist-query"
+          ref="searchInput"
+          v-model="searchKeyword"
+          placeholder="输入歌手或乐队名称"
+          maxlength="100"
+          @input="onSearchInput"
+          @compositionstart="onCompositionStart"
+          @compositionend="onCompositionEnd"
+        />
         <button type="submit">搜索</button>
         <button type="button" @click="resetSearch">重置</button>
       </form>
@@ -149,7 +246,7 @@ onUnmounted(() => {
           <h2>{{ searchActive ? `「${submitted}」相关歌手` : '本批平台推荐歌手' }}</h2>
           <span>{{ summary }}</span>
         </div>
-        <button v-if="!searchActive" class="ghost-action" :disabled="loading" @click="loadDiscovery">
+        <button v-if="!searchActive" class="ghost-action" :disabled="loading" @click="nextDiscoveryBatch">
           <icon-tabler:refresh class="text-sm" :class="{ 'animate-spin': discoveryLoading }" />
           {{ discoveryLoading ? '加载中' : '换一批' }}
         </button>
@@ -184,7 +281,7 @@ onUnmounted(() => {
           <h2>本次没有可展示的歌手</h2>
           <p>平台这次返回的歌单为空或暂不可用，可以换一批，或直接按名字搜索。</p>
           <div class="state-actions">
-            <button @click="loadDiscovery">换一批</button>
+            <button @click="nextDiscoveryBatch">换一批</button>
             <button class="is-quiet" @click="focusSearch">直接搜索</button>
           </div>
         </template>
@@ -193,7 +290,7 @@ onUnmounted(() => {
       <div v-else class="artist-grid">
         <button v-for="artist in visibleArtists" :key="artist.key" class="artist-card" @click="openArtist(artist)">
           <span class="artist-card__art">
-            <MusicCover :src="artist.coverUrl" :alt="`${artist.name} 的代表作品封面`" />
+            <MusicCover :src="artist.coverUrl" :alt="`${artist.name} 的作品封面`" />
             <span class="artist-card__badge">{{ artist.sourceName }}</span>
             <span class="artist-card__arrow"><icon-tabler:arrow-up-right /></span>
           </span>

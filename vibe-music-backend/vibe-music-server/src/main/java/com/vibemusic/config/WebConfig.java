@@ -32,7 +32,7 @@ public class WebConfig implements WebMvcConfigurer {
                         "/banner/getBannerList",
                         "/playlist/getAllPlaylists", "/playlist/getRecommendedPlaylists", "/playlist/getPlaylistDetail/**",
                         "/playlist/discoverOnline", "/playlist/onlineDetail",
-                        "/artist/getAllArtists", "/artist/getArtistDetail/**",
+                        "/artist/getAllArtists", "/artist/getArtistDetail/**", "/artist/discoverOnline",
                         "/song/getAllSongs", "/song/getRecommendedSongs", "/song/getSongDetail/**",
                         "/song/discoverOnline", "/song/bilibiliCollection",
                         "/song/coverOnline", "/song/lyricOnline")

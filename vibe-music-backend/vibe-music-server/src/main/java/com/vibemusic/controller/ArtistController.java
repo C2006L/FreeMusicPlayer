@@ -4,9 +4,11 @@ package com.vibemusic.controller;
 import com.vibemusic.model.dto.ArtistDTO;
 import com.vibemusic.model.vo.ArtistDetailVO;
 import com.vibemusic.model.vo.ArtistVO;
+import com.vibemusic.model.vo.OnlineArtistVO;
 import com.vibemusic.result.PageResult;
 import com.vibemusic.result.Result;
 import com.vibemusic.service.IArtistService;
+import com.vibemusic.service.OnlineMusicService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,6 +30,9 @@ public class ArtistController {
 
     @Autowired
     private IArtistService artistService;
+
+    @Autowired
+    private OnlineMusicService onlineMusicService;
 
     /**
      * 获取所有歌手列表
@@ -60,6 +65,19 @@ public class ArtistController {
     @GetMapping("/getArtistDetail/{id}")
     public Result<ArtistDetailVO> getArtistDetail(@PathVariable("id") Long artistId, HttpServletRequest request) {
         return artistService.getArtistDetail(artistId, request);
+    }
+
+    /**
+     * 歌手发现首屏。由平台多份推荐歌单聚合出真实歌手与跨歌单去重后的曲目数，
+     * 不读取本地种子库，也不接受客户端拼装的歌手名单。
+     */
+    @GetMapping("/discoverOnline")
+    public Result<List<OnlineArtistVO>> discoverOnline(@RequestParam(defaultValue = "60") int limit) {
+        try {
+            return Result.success(onlineMusicService.discoverArtists(limit));
+        } catch (Exception exception) {
+            return Result.error("在线歌手暂时不可用，请稍后重试");
+        }
     }
 
 }

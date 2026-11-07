@@ -1,7 +1,7 @@
 import http from 'node:http'
 import Meting from '@meting/core'
 import { relevanceScore, matchesSearch } from './search-utils.mjs'
-import { discoverFromPlaylists, discoverPlaylists, discoveryBatch } from './discovery.mjs'
+import { discoverArtists, discoverFromPlaylists, discoverPlaylists, discoveryBatch } from './discovery.mjs'
 import { loadBilibiliCollection } from './bilibili-collection.mjs'
 import { SourceRuntime } from './source-runtime.mjs'
 import { proxyPublicCover } from './public-cover.mjs'
@@ -37,6 +37,7 @@ const sourceNames = {
 }
 const discoveryCache = { expiresAt: 0, songs: [], failedSources: [], offset: 0, pending: null }
 const playlistDiscoveryCache = { expiresAt: 0, playlists: [], failedSources: [], pending: null }
+const artistDiscoveryCache = { expiresAt: 0, artists: [], loadedPlaylists: 0, pending: null }
 const coverFallback = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400"><rect width="400" height="400" fill="#e6e2da"/><g fill="#a9a49b"><path d="M258 86v164a44 44 0 1 1-16-34V120l-88 18v124a44 44 0 1 1-16-34V124l120-24z"/></g></svg>')
 const resourceCache = new Map()
 const collectionCache = new Map()
@@ -356,6 +357,26 @@ const server = http.createServer(async (request, response) => {
     return sendJson(response, 200, {
       playlists, failedSources: playlistDiscoveryCache.failedSources, cached, origin: 'platform-playlists',
     })
+  }
+
+  if (request.method === 'GET' && url.pathname === '/artists') {
+    const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 60, 1), 120)
+    if (!goMusicApiUrl) return sendJson(response, 503, { error: 'artist discovery requires go-music-api' })
+    const cached = Date.now() < artistDiscoveryCache.expiresAt
+    if (!cached) {
+      if (!artistDiscoveryCache.pending) artistDiscoveryCache.pending = discoverArtists(goMusicApiUrl, normalizeGoSongs, fetch, { artistLimit: 120 })
+        .then(result => {
+          artistDiscoveryCache.artists = result.artists
+          artistDiscoveryCache.loadedPlaylists = result.loadedPlaylists
+          artistDiscoveryCache.expiresAt = Date.now() + (result.artists.length ? 20 * 60 * 1000 : 30000)
+        })
+        .catch(() => { artistDiscoveryCache.expiresAt = Date.now() + 30000 })
+        .finally(() => { artistDiscoveryCache.pending = null })
+      try { await artistDiscoveryCache.pending } catch { /* keep the last good batch */ }
+    }
+    const artists = artistDiscoveryCache.artists.slice(0, limit)
+    if (!artists.length) return sendJson(response, 503, { error: 'artist discovery unavailable' })
+    return sendJson(response, 200, { artists, loadedPlaylists: artistDiscoveryCache.loadedPlaylists, cached })
   }
 
   if (request.method === 'GET' && url.pathname === '/search') {

@@ -44,6 +44,99 @@ const playlistPlatforms = [
   { source: 'qq', sourceName: 'QQ音乐' },
 ]
 
+// Counts on artist cards must reflect songs found across many recommended
+// playlists. One batch of 30 discovery songs made almost every artist say
+// "1 首", so the artist feed aggregates playlist details server-side.
+const artistDelimiters = /[,，、;；]|\s+\/\s+|\s+(?:feat\.?|ft\.?)\s+/i
+const normalizeArtistKey = (name) => String(name || '').trim().normalize('NFKC').toLowerCase().replace(/\s+/g, ' ')
+const artistNameList = (raw) => String(raw || '').split(artistDelimiters).map((name) => name.trim()).filter(Boolean)
+// Same song repeated in several playlists is one candidate. Album and a
+// rounded duration separate different editions instead of collapsing them.
+const songIdentity = (song) => [
+  normalizeArtistKey(song.name),
+  normalizeArtistKey(song.artist),
+  normalizeArtistKey(song.album),
+  Math.round((Number(song.duration) || 0) / 5),
+].join('|')
+const rejectedRecording = /串烧|大串烧|下载歌曲|音乐论坛|studio_video/i
+
+const mapWithConcurrency = async (items, limit, worker) => {
+  const results = new Array(items.length)
+  let cursor = 0
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++
+      results[index] = await worker(items[index])
+    }
+  })
+  await Promise.all(runners)
+  return results
+}
+
+export const discoverArtists = async (apiBase, normalizeSongs, fetchImpl = fetch, options = {}) => {
+  const playlistLimit = Math.min(Math.max(Number(options.playlistLimit) || 8, 1), 12)
+  const artistLimit = Math.min(Math.max(Number(options.artistLimit) || 60, 1), 120)
+  const songsPerPlaylist = Math.min(Math.max(Number(options.songsPerPlaylist) || 120, 20), 200)
+  const { playlists } = await discoverPlaylists(apiBase, fetchImpl, playlistLimit)
+  const selected = playlists.slice(0, playlistLimit)
+  const details = await mapWithConcurrency(selected, 4, async (playlist) => {
+    try {
+      const query = new URLSearchParams({ source: playlist.source, id: playlist.id })
+      const response = await fetchImpl(`${apiBase}/api/v1/playlist/detail?${query}`, {
+        signal: AbortSignal.timeout(10000),
+        headers: { Accept: 'application/json' },
+      })
+      if (!response.ok) return null
+      const payload = await response.json()
+      if (!Array.isArray(payload.data)) return null
+      return normalizeSongs(payload.data.filter((song) => song.source === playlist.source), songsPerPlaylist)
+    } catch { return null }
+  })
+  const artists = new Map()
+  const seenSongs = new Set()
+  let loadedPlaylists = 0
+  for (const songs of details) {
+    if (!songs) continue
+    loadedPlaylists++
+    for (const song of songs) {
+      if (!song || !song.name || song.availability === 'unavailable' || rejectedRecording.test(song.name)) continue
+      const identity = songIdentity(song)
+      if (seenSongs.has(identity)) continue
+      seenSongs.add(identity)
+      for (const name of artistNameList(song.artist)) {
+        const key = normalizeArtistKey(name)
+        if (!key) continue
+        const existing = artists.get(key)
+        if (existing) {
+          existing.songCount++
+          if (!existing.coverUrl && song.coverOriginal) {
+            existing.coverUrl = song.coverOriginal
+            existing.coverSource = song.source
+          }
+          const sourceName = song.sourceName || song.source
+          if (!existing.sources.includes(sourceName)) existing.sources.push(sourceName)
+        } else {
+          artists.set(key, {
+            key,
+            name,
+            songCount: 1,
+            sampleSongName: song.name,
+            coverUrl: song.coverOriginal || '',
+            coverSource: song.source,
+            source: song.source,
+            sourceName: song.sourceName || song.source,
+            sources: [song.sourceName || song.source],
+          })
+        }
+      }
+    }
+  }
+  const list = [...artists.values()]
+    .sort((left, right) => right.songCount - left.songCount || left.name.localeCompare(right.name, 'zh-Hans-CN'))
+    .slice(0, artistLimit)
+  return { artists: list, playlistTotal: selected.length, loadedPlaylists }
+}
+
 // Only expose the platform's own recommendation feed: id, cover, creator and
 // counters come straight from upstream and are never synthesised here.
 export const discoverPlaylists = async (apiBase, fetchImpl = fetch, limit = 24) => {
