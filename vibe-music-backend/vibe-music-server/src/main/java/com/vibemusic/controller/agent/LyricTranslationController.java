@@ -20,6 +20,14 @@ public class LyricTranslationController {
     @DeleteMapping("/{id}") public Result<Map<String,Object>> cancel(@PathVariable String id,HttpServletRequest request) {return Result.success(service.cancel(owner(request),id));}
     private String owner(HttpServletRequest request) {
         Map<String,Object> claims=ThreadLocalUtil.get();Object id=claims==null?null:claims.get("userId");
-        return id==null?"session:"+request.getSession(true).getId():"user:"+id;
+        if(id!=null) return "user:"+id;
+        // 匿名请求不能依赖服务端 session：前端请求不带 Cookie 时每次都是新 session，轮询必然 404。
+        // 复用浏览器持久化的匿名标识，保证发起与查询落到同一个 owner。
+        String visitor=request.getHeader("X-Visitor-Id");
+        if(visitor!=null) {
+            String normalized=visitor.trim();
+            if(normalized.matches("[A-Za-z0-9_-]{8,64}")) return "anon:"+normalized;
+        }
+        return "session:"+request.getSession(true).getId();
     }
 }

@@ -1,11 +1,13 @@
 import { UserStore } from '@/stores/modules/user'
 import type { LyricPayload } from '@/utils/lyricLines'
 import { resolveApiBase } from '@/utils/apiBase'
+import { getVisitorId } from '@/utils/visitor'
 const base = resolveApiBase()
 async function request(path: string, options: RequestInit = {}, timeout = 10000) {
   const token = UserStore().userInfo?.token
   const response = await fetch(base + path, { credentials: 'include', ...options, headers: {
-    'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...options.headers,
+    'Content-Type': 'application/json', 'X-Visitor-Id': getVisitorId(),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}), ...options.headers,
   }, signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout) })
   if (!response.ok) throw new Error(response.status === 429 ? '任务过多，请稍后重试' : '歌词服务请求失败，请稍后重试')
   const result = await response.json()
