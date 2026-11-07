@@ -384,6 +384,11 @@ export const AudioPlayer = () => {
       return
     }
 
+    // 已告知过的试听兜底：保持播放，不要暂停后再次换源，否则会停在只有转圈的中间态。
+    if (previewFallbacks.has(resourceIdentity(currentTrack.value))) {
+      currentTrack.value.playbackStatus = 'preview'
+      return
+    }
     const shouldResume = playbackRequested.value
     audioElement.value.pause()
     if (!shouldResume) { currentTrack.value.playbackStatus = 'preview'; return }
@@ -565,6 +570,12 @@ export const AudioPlayer = () => {
     if (element && isOnlineTrack(currentTrack.value) && classifyMedia(Number(currentTrack.value.duration), element.currentTime) === 'preview') {
       evidence.set(currentTrack.value, 'preview')
       if (currentTrack.value.collectionId) { await handlePlaybackFailure('合集条目仅提供试听'); return }
+      if (previewFallbacks.has(resourceIdentity(currentTrack.value))) {
+        // 试听片段已播完：停在“仅试听”，收起加载态并让播放键恢复可点。
+        currentTrack.value.playbackStatus = 'preview'
+        playbackRequested.value = false
+        return
+      }
       await tryAlternative('音频在完整时长之前结束，疑似试听片段', true)
       return
     }
