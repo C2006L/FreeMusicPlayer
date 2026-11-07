@@ -38,7 +38,6 @@ const sourceNames = {
 const discoveryCache = { expiresAt: 0, songs: [], failedSources: [], offset: 0, pending: null }
 const playlistDiscoveryCache = { expiresAt: 0, playlists: [], failedSources: [], pending: null }
 const artistDiscoveryCache = { expiresAt: 0, artists: [], loadedPlaylists: 0, pending: null }
-const coverFallback = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400"><rect width="400" height="400" fill="#e6e2da"/><g fill="#a9a49b"><path d="M258 86v164a44 44 0 1 1-16-34V120l-88 18v124a44 44 0 1 1-16-34V124l120-24z"/></g></svg>')
 const resourceCache = new Map()
 const collectionCache = new Map()
 const streamTargets = new Map()
@@ -510,15 +509,14 @@ const server = http.createServer(async (request, response) => {
     } catch (error) {
       if (response.headersSent) { response.destroy(); return }
       if (url.pathname === '/cover') {
-        // A missing upstream cover is not a page error. Return a neutral
-        // placeholder so the card keeps its layout and the console stays clean.
-        response.writeHead(200, {
-          'Content-Type': 'image/svg+xml; charset=utf-8',
-          'Cache-Control': 'private, max-age=60',
-          'X-Content-Type-Options': 'nosniff',
+        // 失败时不要用 200 返回占位图：浏览器会把它当作真实封面缓存，
+        // 前端也无法感知失败并重试。改为明确的 502 + no-store。
+        response.writeHead(502, {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Cache-Control': 'no-store',
           'X-Cover-Fallback': '1',
         })
-        return response.end(coverFallback)
+        return response.end('cover unavailable')
       }
       return sendJson(response, 502, { error: error instanceof Error ? error.message : 'upstream failed' })
     }

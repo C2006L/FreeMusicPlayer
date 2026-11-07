@@ -22,15 +22,41 @@ export const publicCoverUrl = raw => {
   }
   return url
 }
+// getaddrinfo 走 libuv 线程池且无法取消：超时放弃的解析仍占用线程，长跑进程
+// 反复超时后线程池被占满，后续所有封面的解析都只能等到超时。这里按域名去重
+// 并缓存结果，超时后做负缓存，避免对同一坏域名反复堆积无法取消的解析。
+const hostCache = new Map()
+const hostInflight = new Map()
+const resolvePublicHost = hostname => {
+  const cached = hostCache.get(hostname)
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.error ? Promise.reject(new Error(cached.error)) : Promise.resolve(cached.addresses)
+  }
+  const pending = hostInflight.get(hostname)
+  if (pending) return pending
+  let timer
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('cover DNS timeout')), 10_000)
+    if (typeof timer.unref === 'function') timer.unref()
+  })
+  const task = Promise.race([dns.lookup(hostname, { all: true }), timeout])
+    .then(addresses => {
+      hostCache.set(hostname, { addresses, expiresAt: Date.now() + 5 * 60_000 })
+      return addresses
+    }, error => {
+      hostCache.set(hostname, { error: error.message, expiresAt: Date.now() + 60_000 })
+      throw error
+    })
+    .finally(() => { clearTimeout(timer); hostInflight.delete(hostname) })
+  while (hostCache.size > 100) hostCache.delete(hostCache.keys().next().value)
+  hostInflight.set(hostname, task)
+  return task
+}
 // Validate each redirect and pin the DNS result to the actual connection.
 export const proxyPublicCover = async (raw, response, depth = 0) => {
   if (depth > 3) throw new Error('cover redirect limit')
   const url = publicCoverUrl(raw)
-  let timer
-  const addresses = await Promise.race([
-    dns.lookup(url.hostname.replace(/^\[|\]$/g,''),{all:true}),
-    new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('cover DNS timeout')),5000)})
-  ]).finally(()=>clearTimeout(timer))
+  const addresses = await resolvePublicHost(url.hostname.replace(/^\[|\]$/g,''))
   if (!addresses.length || addresses.some(item=>!isPublicAddress(item.address))) throw new Error('private DNS result')
   const pinned=addresses.find(item=>item.family===4) || addresses[0]
   const upstream=await new Promise((resolve,reject)=>{
