@@ -2,6 +2,7 @@
 import { getFavoriteSongs } from '@/api/system'
 import type { Song } from '@/api/interface'
 import coverImg from '@/assets/cover.png'
+import defaultAlbum from '@/assets/default_album.jpg'
 import { AudioStore } from '@/stores/modules/audio'
 import { useFavoriteStore } from '@/stores/modules/favorite'
 import { useRoute } from 'vue-router'
@@ -44,10 +45,6 @@ const getSongs = async () => {
         songs.value = pageData.items
         playlist.value.trackCount = pageData.total
         favoriteStore.likeCount = pageData.total
-        // 使用第一首歌的封面作为封面图
-        if (pageData.items.length > 0) {
-            playlist.value.coverImgUrl = pageData.items[0].coverUrl || coverImg
-        }
     }
 }
 
@@ -115,7 +112,8 @@ onMounted(() => {
     <div class="flex flex-col md:flex-row p-6 max-sm:p-4 gap-6">
       <div class="flex-shrink-0 w-60 h-60">
         <img :alt="playlist.name" class="w-full h-full object-cover rounded-lg shadow-lg"
-          :src="playlist.coverImgUrl + '?param=500y500'" />
+          :src="playlist.coverImgUrl" loading="eager" decoding="async"
+          @error="playlist.coverImgUrl = defaultAlbum" />
       </div>
       <div class="flex flex-col justify-between flex-1">
         <div>
