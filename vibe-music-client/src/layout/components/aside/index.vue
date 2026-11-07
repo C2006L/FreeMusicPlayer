@@ -37,6 +37,7 @@ watch(
   (newVal) => {
     if (newVal) {
       favoriteStore.getFavoritePlaylists()
+      favoriteStore.refreshLikeCount()
     } else {
       favoriteStore.clearFavoritePlaylists()
     }
@@ -76,7 +77,9 @@ watch(
           "
         >
           <Icon :icon="item2.icon" class="text-lg" />
-          <span>{{ item2.title }}</span>
+          <span>
+            {{ item2.title }}<template v-if="item2.router === '/like' && user.isLoggedIn"> · {{ favoriteStore.likeCount }}</template>
+          </span>
         </div>
       </div>
 

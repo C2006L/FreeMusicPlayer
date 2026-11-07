@@ -3,6 +3,7 @@ import { getFavoriteSongs } from '@/api/system'
 import type { Song } from '@/api/interface'
 import coverImg from '@/assets/cover.png'
 import { AudioStore } from '@/stores/modules/audio'
+import { useFavoriteStore } from '@/stores/modules/favorite'
 import { useRoute } from 'vue-router'
 import { useMediaQuery } from '@vueuse/core'
 
@@ -10,6 +11,7 @@ const isPhone = useMediaQuery('(max-width: 767px)')
 
 const route = useRoute()
 const audui = AudioStore()
+const favoriteStore = useFavoriteStore()
 const { play } = useAudioPlayer()
 
 const songs = ref<Song[]>([])
@@ -41,6 +43,7 @@ const getSongs = async () => {
         const pageData = res.data as PageResult
         songs.value = pageData.items
         playlist.value.trackCount = pageData.total
+        favoriteStore.likeCount = pageData.total
         // 使用第一首歌的封面作为封面图
         if (pageData.items.length > 0) {
             playlist.value.coverImgUrl = pageData.items[0].coverUrl || coverImg
@@ -84,6 +87,16 @@ watch(() => audui.currentPageSongs, (newSongs) => {
         }
     }
 }, { deep: true })
+
+// 收藏数量变化（任意页面收藏/取消歌曲）时，喜欢页即时重拉，避免只改图标不改列表
+watch(() => favoriteStore.likeCount, (count) => {
+    if (route.path !== '/like') return
+    // 页面自身拉取后会把 trackCount 与 likeCount 同时写入，值一致说明列表已是最新
+    if (count === playlist.value.trackCount) return
+    const lastPage = Math.max(1, Math.ceil(count / pageSize.value))
+    if (currentPage.value > lastPage) currentPage.value = lastPage
+    getSongs()
+})
 
 // 监听路由变化，每次进入页面时重新获取数据
 watch(() => route.path, (newPath) => {

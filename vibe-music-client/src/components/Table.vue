@@ -6,6 +6,7 @@ import { formatTime } from '@/utils'
 import { cancelCollectSong, collectSong, importOnlineSong, probeOnlineSong } from '@/api/system'
 import { ElMessage } from 'element-plus'
 import { UserStore } from '@/stores/modules/user'
+import { useFavoriteStore } from '@/stores/modules/favorite'
 import { songToTrack } from '@/utils/songTrack'
 import { usePlaybackEvidence } from '@/stores/modules/playbackEvidence'
 import { evidenceLabel } from '@/utils/playbackPolicy'
@@ -20,6 +21,7 @@ const props = defineProps({
 })
 const emit = defineEmits<{ retry: [] }>()
 const audio = AudioStore()
+const favoriteStore = useFavoriteStore()
 const evidence = usePlaybackEvidence()
 const probeGrades = ref<Record<string, string>>({})
 const gradeOf = (song: Song) => probeGrades.value[availabilityKey(song)] ?? rememberedGrade(song) ?? song.availability
@@ -106,6 +108,18 @@ const updateLikeState = (song: Song, id: number | string, status: number) => {
 const handleLike = async (song: Song) => {
   if (!userStore.isLoggedIn) return ElMessage.warning('登录后才能收藏歌曲')
   try {
+    const wasLiked = Boolean(song.likeStatus)
+    if (wasLiked) {
+      // 已收藏的在线歌曲同样按 songId 取消，不能再走“在线登记 + 收藏”，否则心形永远取消不掉
+      const id = Number(song.songId)
+      if (!Number.isFinite(id)) throw new Error('歌曲标识无效')
+      const response = await cancelCollectSong(id)
+      if (response.code !== 0) throw new Error(response.message || '操作失败')
+      updateLikeState(song, id, 0)
+      favoriteStore.refreshLikeCount()
+      return ElMessage.success('已取消喜欢')
+    }
+    let id = Number(song.songId)
     if (song.online) {
       const imported = await importOnlineSong({
         source: song.source, sourceSongId: song.sourceSongId, sourceUrlId: song.sourceUrlId,
@@ -114,19 +128,15 @@ const handleLike = async (song: Song) => {
         album: song.album, duration: Number(song.duration) || 0,
       })
       if (imported.code !== 0 || typeof imported.data !== 'number') throw new Error(imported.message || '在线歌曲登记失败')
-      const collected = await collectSong(imported.data)
-      if (collected.code !== 0) throw new Error(collected.message || '收藏失败')
+      id = imported.data
       song.online = false
-      updateLikeState(song, imported.data, 1)
-      return ElMessage.success('已添加到我的喜欢')
     }
-    const id = Number(song.songId)
     if (!Number.isFinite(id)) throw new Error('歌曲标识无效')
-    const wasLiked = Boolean(song.likeStatus)
-    const response = wasLiked ? await cancelCollectSong(id) : await collectSong(id)
-    if (response.code !== 0) throw new Error(response.message || '操作失败')
-    updateLikeState(song, id, wasLiked ? 0 : 1)
-    ElMessage.success(wasLiked ? '已取消喜欢' : '已添加到我的喜欢')
+    const response = await collectSong(id)
+    if (response.code !== 0) throw new Error(response.message || '收藏失败')
+    updateLikeState(song, id, 1)
+    favoriteStore.refreshLikeCount()
+    ElMessage.success('已添加到我的喜欢')
   } catch (error: any) {
     ElMessage.error(error?.message || '操作失败')
   }

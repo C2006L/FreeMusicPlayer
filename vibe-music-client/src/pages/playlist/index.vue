@@ -32,7 +32,7 @@ const openingKey = ref('')
 
 const playlistsList = [
   { name: '精选歌单', value: 'all' },
-  { name: '我的收藏', value: 'favorite' }
+  { name: '收藏歌单', value: 'favorite' }
 ]
 const playTags = ref<{ name: string }[]>([])
 const selectedTag = ref('全部')
@@ -222,7 +222,7 @@ onMounted(() => {
           <p>{{ onlineError }}</p>
           <div class="state-actions">
             <button @click="loadOnlinePlaylists(true)">重新连接</button>
-            <button class="is-quiet" @click="selected = 'favorite'; selectPlaylist('favorite')">查看我的收藏</button>
+            <button class="is-quiet" @click="selected = 'favorite'; selectPlaylist('favorite')">查看收藏歌单</button>
           </div>
         </div>
 
@@ -260,7 +260,7 @@ onMounted(() => {
         <div class="section-heading">
           <div>
             <p>{{ selected === 'favorite' ? 'MY COLLECTION' : 'LIBRARY PLAYLISTS' }}</p>
-            <h2>{{ selected === 'favorite' ? '我的收藏歌单' : '站内歌单' }}</h2>
+            <h2>{{ selected === 'favorite' ? '收藏的歌单' : '站内歌单' }}</h2>
             <span>{{ state.total }} 张{{ selectedTag !== '全部' ? ` · ${selectedTag}` : '' }}</span>
           </div>
         </div>
@@ -277,7 +277,7 @@ onMounted(() => {
 
         <div v-else-if="!playlists.length" class="state-panel">
           <h2>{{ selected === 'favorite' ? '还没有收藏歌单' : '当前筛选下没有歌单' }}</h2>
-          <p>{{ selected === 'favorite' ? '在歌单详情页收藏后会出现在这里。' : '换个风格或关键词再试。' }}</p>
+          <p>{{ selected === 'favorite' ? '在歌单详情页收藏后会出现在这里；收藏的歌曲请前往「喜欢」页查看。' : '换个风格或关键词再试。' }}</p>
           <div class="state-actions">
             <button v-if="selected === 'favorite'" @click="selectPlaylist('all')">浏览歌单</button>
             <button v-else class="is-quiet" @click="selectedTag = '全部'; searchKeyword = ''; handleSearch()">重置筛选</button>

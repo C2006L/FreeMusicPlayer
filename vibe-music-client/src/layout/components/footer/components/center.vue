@@ -10,6 +10,7 @@ import { useRoute } from 'vue-router'
 import { useLibraryStore } from '@/stores/modules/library'
 import { useArtistStore } from '@/stores/modules/artist'
 import { usePlaylistStore } from '@/stores/modules/playlist'
+import { useFavoriteStore } from '@/stores/modules/favorite'
 import { usePlaybackEvidence } from '@/stores/modules/playbackEvidence'
 import { evidenceLabel } from '@/utils/playbackPolicy'
 
@@ -17,6 +18,7 @@ const userStore = UserStore()
 const audioStore = AudioStore()
 const route = useRoute()
 const libraryStore = useLibraryStore()
+const favoriteStore = useFavoriteStore()
 const evidence = usePlaybackEvidence()
 
 const {
@@ -115,7 +117,9 @@ const handleLike = async () => {
 
   try {
     let songId = Number(currentTrack.id)
-    if (currentTrack.online) {
+    const liked = currentSongLikeStatus.value === 1
+    // 取消收藏时不再重复登记在线歌曲，直接按已有 songId 取消
+    if (!liked && currentTrack.online) {
       const imported = await importOnlineSong({
         source: currentTrack.source,
         sourceSongId: currentTrack.sourceSongId,
@@ -140,11 +144,12 @@ const handleLike = async () => {
       ElMessage.error('歌曲标识无效')
       return
     }
-    if (currentSongLikeStatus.value === 0) {
+    if (!liked) {
       // 收藏歌曲
       const res = await collectSong(songId)
       if (res.code === 0) {
         updateAllSongLikeStatus(songId, 1)
+        favoriteStore.refreshLikeCount()
         ElMessage.success('已添加到我的喜欢')
       } else {
         ElMessage.error(res.message || '添加到我的喜欢失败')
@@ -154,6 +159,7 @@ const handleLike = async () => {
       const res = await cancelCollectSong(songId)
       if (res.code === 0) {
         updateAllSongLikeStatus(songId, 0)
+        favoriteStore.refreshLikeCount()
         ElMessage.success('已取消喜欢')
       } else {
         ElMessage.error(res.message || '取消喜欢失败')
