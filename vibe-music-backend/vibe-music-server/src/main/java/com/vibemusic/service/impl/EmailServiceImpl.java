@@ -5,6 +5,7 @@ import com.vibemusic.service.EmailService;
 import com.vibemusic.util.RandomCodeUtil;
 import jakarta.annotation.PostConstruct;
 import jakarta.mail.MessagingException;
+import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -14,6 +15,7 @@ import org.springframework.mail.javamail.JavaMailSenderImpl;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 
+import java.io.UnsupportedEncodingException;
 import java.util.Locale;
 import java.util.Set;
 
@@ -78,13 +80,14 @@ public class EmailServiceImpl implements EmailService {
         MimeMessage mimeMessage = mailSender.createMimeMessage();
         try {
             MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, "UTF-8");
-            helper.setFrom(from);
+            // Fixed display name only; the address still comes from configuration.
+            helper.setFrom(new InternetAddress(from, "FreeMusicPlayer", "UTF-8"));
             helper.setTo(to);
             helper.setSubject(subject);
             helper.setText(content);
             mailSender.send(mimeMessage);
             return true;
-        } catch (MessagingException | MailException e) {
+        } catch (MessagingException | MailException | UnsupportedEncodingException e) {
             log.error("向 {} 发送邮件失败（SMTP {}）：{}", to, deliveryTarget(), e.getMessage(), e);
             return false;
         }
