@@ -121,9 +121,28 @@ public class OnlineAgentTools {
             return summaries.toString();
         } catch(Exception error) { searchFailed=true; return "[]"; }
     }
+    /** 情绪/场景：按主题歌单检索真实曲目，只做质量过滤与去重，不用固定种子替代。 */
+    public synchronized String preparedThemeContext(List<String> queries) {
+        try {
+            var summaries = new ArrayList<Map<String,Object>>();
+            var found = music.theme(queries, 20).stream()
+                    .filter(song->!"unavailable".equals(java.util.Objects.toString(song.getAvailability(),"unknown")))
+                    .filter(song->!completeOnly || "full".equals(song.getAvailability()))
+                    .filter(OnlineAgentTools::studioEdition)
+                    .limit(8).toList();
+            for(var song:found) {
+                songs.putIfAbsent(song.getSongId(),song);
+                summaries.add(Map.of("songName",java.util.Objects.toString(song.getSongName(),""),
+                        "artistName",java.util.Objects.toString(song.getArtistName(),""),
+                        "availability",java.util.Objects.toString(song.getAvailability(),"unknown")));
+            }
+            // 空结果是真实“没找到”，不是检索失败，调用方文案要区分。
+            return summaries.toString();
+        } catch(Exception error) { searchFailed=true; return "[]"; }
+    }
     private static boolean studioEdition(OnlineSongVO song) {
         String text=java.util.Objects.toString(song.getSongName(),"")+" "+java.util.Objects.toString(song.getAlbum(),"");
-        return !java.util.regex.Pattern.compile("(?i)remix|混音|live|现场|演唱会|cover|翻唱|伴奏|instrumental|acoustic|不插电|demo|remaster|重制|改编|加速|降速|慢板|(^|[\\s（(])dj").matcher(text).find();
+        return !java.util.regex.Pattern.compile("(?i)remix|混音|live|现场|演唱会|cover|翻唱|伴奏|片段|instrumental|acoustic|不插电|demo|remaster|重制|改编|加速|降速|慢板|(^|[\\s（(])dj|(^|[\\s（(])[^）)]*版[）)]").matcher(text).find();
     }
 
     private boolean matches(String keyword, OnlineSongVO song) {

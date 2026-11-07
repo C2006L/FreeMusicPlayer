@@ -242,6 +242,27 @@ public class OnlineMusicService {
         return verifyAvailability(songs,Math.min(SEARCH_PROBE_BUDGET_MS,remaining));
     }
 
+    /**
+     * 情绪/场景推荐：按多个组合关键词检索平台主题歌单，返回真实曲目。
+     * 每次请求由 provider 随机挑选相关歌单与曲目，不再使用固定种子歌曲。
+     */
+    public List<OnlineSongVO> theme(List<String> keywords, int limit) {
+        if (keywords == null || keywords.isEmpty()) return List.of();
+        String joined = keywords.stream().map(String::trim).filter(item -> !item.isBlank())
+                .distinct().limit(4).reduce((left, right) -> left + "|" + right).orElse("");
+        if (joined.isBlank()) return List.of();
+        String uri = UriComponentsBuilder.fromUriString(providerUrl + "/theme")
+                .queryParam("keywords", joined)
+                .queryParam("limit", Math.min(Math.max(limit, 1), 20))
+                .build()
+                .encode()
+                .toUriString();
+        long startedAt = System.nanoTime();
+        List<OnlineSongVO> songs = parseSongs(providerBody(uri, true));
+        long remaining = SEARCH_TOTAL_BUDGET_MS - TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
+        return verifyAvailability(songs, Math.min(SEARCH_PROBE_BUDGET_MS, Math.max(remaining, 0)));
+    }
+
     public List<OnlineSongVO> bilibiliCollection(String bvid) {
         if (bvid == null || !bvid.matches("^BV[a-zA-Z0-9]{10}$")) throw new IllegalArgumentException("无效的 B 站视频编号");
         String uri = UriComponentsBuilder.fromUriString(providerUrl + "/bilibili/collection")

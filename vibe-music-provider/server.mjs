@@ -226,6 +226,86 @@ const normalizeGoSongs = (rows, limit) => {
   }).filter((song) => song?.id && song.name)
 }
 
+// 情绪/场景推荐：按组合关键词检索平台主题歌单，再取歌单曲目。
+// 每次请求随机挑选相关歌单与曲目，避免同类问句永远命中同一批歌。
+const themePlaylistCache = new Map()
+const themeSongCache = new Map()
+const THEME_CACHE_TTL = 10 * 60 * 1000
+
+const shuffleList = (list) => {
+  const copy = [...list]
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const swap = Math.floor(Math.random() * (index + 1))
+    ;[copy[index], copy[swap]] = [copy[swap], copy[index]]
+  }
+  return copy
+}
+
+const themeTokens = (keyword) => keyword.normalize('NFKC').toLowerCase()
+  .split(/[\s,，、]+/)
+  .map((token) => token.replace(/歌单|音乐|歌曲|推荐/g, '').trim())
+  .filter(Boolean)
+
+const themePlaylists = async (keyword) => {
+  const tokens = themeTokens(keyword)
+  if (!tokens.length) return []
+  const key = tokens.join(' ')
+  const cached = themePlaylistCache.get(key)
+  if (cached && cached.expiresAt > Date.now()) return cached.playlists
+  const query = new URLSearchParams({ q: keyword, type: 'playlist' })
+  const response = await withTimeout(fetch(`${goMusicApiUrl}/api/v1/music/search?${query}`, {
+    headers: { Accept: 'application/json', 'User-Agent': 'FreeMusicPlayer/2.0' },
+    signal: AbortSignal.timeout(14000),
+  }), 20000)
+  if (!response.ok) throw new Error(`theme playlist search failed (${response.status})`)
+  const payload = await response.json()
+  const rows = Array.isArray(payload?.data?.playlists) ? payload.data.playlists : []
+  const scored = rows.map((row) => {
+    const name = String(row.name || '').replace(/&nbsp;|&#160;/g, ' ').replace(/\s+/g, ' ').trim()
+    const haystack = name.toLowerCase()
+    const score = tokens.reduce((count, token) => count + (haystack.includes(token) ? 1 : 0), 0)
+    return {
+      id: String(row.id || ''),
+      source: String(row.source || '').toLowerCase(),
+      name,
+      trackCount: Number(row.track_count || 0),
+      score,
+    }
+  }).filter((playlist) => goSources.has(playlist.source) && /^\d{1,20}$/.test(playlist.id)
+    && playlist.trackCount >= 8 && playlist.score >= 1 && !/测试|下载|铃声/i.test(playlist.name))
+    .sort((left, right) => right.score - left.score || right.trackCount - left.trackCount)
+  if (!scored.length) {
+    themePlaylistCache.set(key, { playlists: [], expiresAt: Date.now() + 60 * 1000 })
+    return []
+  }
+  // 同分优先；至少保留 2 个备选，让重复提问能轮换到不同歌单。
+  const bestScore = scored[0].score
+  const best = scored.filter((playlist) => playlist.score === bestScore)
+  const playlists = (best.length >= 2 ? best : scored).slice(0, 8)
+  themePlaylistCache.set(key, { playlists, expiresAt: Date.now() + THEME_CACHE_TTL })
+  return playlists
+}
+
+const themePlaylistSongs = async (playlist) => {
+  const key = `${playlist.source}:${playlist.id}`
+  const cached = themeSongCache.get(key)
+  if (cached && cached.expiresAt > Date.now()) return cached.songs
+  const query = new URLSearchParams({ source: playlist.source, id: playlist.id })
+  const response = await withTimeout(fetch(`${goMusicApiUrl}/api/v1/playlist/detail?${query}`, {
+    headers: { Accept: 'application/json', 'User-Agent': 'FreeMusicPlayer/2.0' },
+    signal: AbortSignal.timeout(20000),
+  }), 25000)
+  if (!response.ok) throw new Error(`theme playlist detail failed (${response.status})`)
+  const payload = await response.json()
+  const rows = Array.isArray(payload?.data) ? payload.data : []
+  const songs = normalizeGoSongs(
+    rows.filter((song) => normalizeSourceForGo(String(song.source || '').toLowerCase()) === playlist.source),
+    1000,
+  ).filter((song) => !/铃声|试听|伴奏|广告|测试|片段|(?:^|[\s（(])live|(?:^|[\s（(])dj|(?:^|[\s（(])[^）)]*版[）)]/i.test(song.name))
+  themeSongCache.set(key, { songs, expiresAt: Date.now() + THEME_CACHE_TTL })
+  return songs
+}
+
 const aggregateSearch = async (keyword, sources, limit, strict = true) => {
   const goRequested = sources.map(normalizeSourceForGo).filter((source) => goSources.has(source))
   const metingRequested = sources.filter((source) => metingSources.has(source))
@@ -356,6 +436,64 @@ const server = http.createServer(async (request, response) => {
     return sendJson(response, 200, {
       playlists, failedSources: playlistDiscoveryCache.failedSources, cached, origin: 'platform-playlists',
     })
+  }
+
+  // 情绪/场景主题检索：组合关键词 -> 平台主题歌单 -> 真实曲目。
+  if (request.method === 'GET' && url.pathname === '/theme') {
+    const keywords = (url.searchParams.get('keywords') || '').split('|')
+      .map((item) => item.trim()).filter(Boolean).slice(0, 4)
+    if (!keywords.length) return sendJson(response, 400, { error: 'keywords must contain 1-4 phrases' })
+    if (!goMusicApiUrl) return sendJson(response, 503, { error: 'theme playlists require go-music-api' })
+    const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 12, 1), 20)
+    try {
+      const pools = await Promise.all(keywords.map((keyword) => themePlaylists(keyword).catch(() => [])))
+      const picks = []
+      const picked = new Set()
+      pools.forEach((pool, index) => {
+        for (const playlist of shuffleList(pool).slice(0, 2)) {
+          const key = `${playlist.source}:${playlist.id}`
+          if (picked.has(key) || picks.length >= 8) continue
+          picked.add(key)
+          picks.push({ ...playlist, keyword: keywords[index] })
+        }
+      })
+      const batches = await Promise.all(picks.map(async (playlist) => ({
+        playlist, songs: await themePlaylistSongs(playlist).catch(() => []),
+      })))
+      const failedSources = []
+      const playlists = []
+      const merged = []
+      for (const batch of batches) {
+        if (!batch.songs.length) {
+          failedSources.push(`${batch.playlist.source}:${batch.playlist.id}`)
+          continue
+        }
+        playlists.push({
+          id: batch.playlist.id,
+          source: batch.playlist.source,
+          name: batch.playlist.name,
+          trackCount: batch.playlist.trackCount,
+          keyword: batch.playlist.keyword,
+        })
+        // 只从前 60 首里随机抽取，保留歌单自身的排序相关性，避免大歌单尾部杂歌。
+        merged.push(...shuffleList(batch.songs.slice(0, 60)))
+      }
+      const seen = new Set()
+      const songs = shuffleList(merged).filter((song) => {
+        const key = `${song.source}:${song.id}`
+        const identity = `${song.name}|${song.artist}`.toLowerCase()
+        if (seen.has(key) || seen.has(identity)) return false
+        seen.add(key)
+        seen.add(identity)
+        return true
+      }).slice(0, limit)
+      if (!songs.length) {
+        return sendJson(response, 503, { error: 'theme playlists returned no usable songs', failedSources })
+      }
+      return sendJson(response, 200, { songs, playlists, failedSources, origin: 'theme-playlists' })
+    } catch {
+      return sendJson(response, 503, { error: 'theme playlists unavailable' })
+    }
   }
 
   if (request.method === 'GET' && url.pathname === '/artists') {

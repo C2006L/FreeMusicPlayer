@@ -11,10 +11,26 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class OnlineAgentToolsTest {
-    @Test void moodRequestsUseConcreteQueriesButExplicitSongRequestsRemainUntouched() {
-        assertEquals(List.of("平凡之路 朴树","陪你度过漫长岁月 陈奕迅"),RecommendationPlan.queries("心情低落的时候听什么好？"));
-        assertTrue(RecommendationPlan.queries("搜索《悲伤音乐》").isEmpty());
-        assertTrue(RecommendationPlan.queries("播放罗大佑的童年").isEmpty());
+    @Test void moodRequestsUseRealThemeQueriesButExplicitSongRequestsRemainUntouched() {
+        var queries=RecommendationPlan.themeQueries("心情低落的时候听什么好？");
+        assertFalse(queries.isEmpty());
+        assertTrue(queries.stream().noneMatch(query->query.contains("平凡之路")));
+        assertTrue(queries.stream().noneMatch(query->query.contains("陪你度过漫长岁月")));
+        assertTrue(queries.stream().allMatch(query->query.contains(" ")));
+        assertTrue(RecommendationPlan.themeQueries("搜索《悲伤音乐》").isEmpty());
+        assertTrue(RecommendationPlan.themeQueries("播放罗大佑的童年").isEmpty());
+    }
+    @Test void themeContextUsesProviderResultsAndKeepsAvailabilityTruthful() {
+        var music=mock(OnlineMusicService.class);
+        var unknown=OnlineSongVO.builder().songId("1").songName("后来").artistName("刘若英").availability("unknown").build();
+        var full=OnlineSongVO.builder().songId("2").songName("十年").artistName("陈奕迅").availability("full").build();
+        var cover=OnlineSongVO.builder().songId("3").songName("后来 (翻唱)").artistName("Other").availability("unknown").build();
+        when(music.theme(anyList(),eq(20))).thenReturn(List.of(unknown,full,cover));
+        var tools=new OnlineAgentTools(music);
+        String context=tools.preparedThemeContext(List.of("失恋 疗伤","分手 情歌"));
+        assertEquals(List.of(unknown,full),tools.songs());
+        assertTrue(context.contains("availability=unknown"));
+        verify(music).theme(argThat(list->list.size()==2),eq(20));
     }
     @Test void preparedRecommendationsRejectCoversAndWrongArtists() {
         var music=mock(OnlineMusicService.class);

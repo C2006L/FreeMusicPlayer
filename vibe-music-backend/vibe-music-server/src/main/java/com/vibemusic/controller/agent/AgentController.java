@@ -77,7 +77,7 @@ public class AgentController {
         emitter.onTimeout(() -> { release.run(); emitter.complete(); });
         emitter.onError(error -> release.run());
         cancellations.put(owner, () -> { release.run(); emitter.complete(); });
-        if (client == null && RecommendationPlan.queries(dto.getQuery()).isEmpty()
+        if (client == null && RecommendationPlan.themeQueries(dto.getQuery()).isEmpty()
                 && !RecommendationPlan.wantsDiscovery(dto.getQuery())) {
             send(emitter, "error", "AI 未启用，请检查模型配置");
             release.run();
@@ -88,7 +88,22 @@ public class AgentController {
                 dto.isCompleteOnly() || OnlineAgentTools.requestsCompleteOnly(dto.getQuery()));
         var emittedText = new java.util.concurrent.atomic.AtomicBoolean();
         Disposable running = reactor.core.publisher.Flux.defer(() -> {
-                    var queries=RecommendationPlan.queries(dto.getQuery());
+                    var queries=RecommendationPlan.themeQueries(dto.getQuery());
+                    if(!queries.isEmpty()) {
+                        send(emitter,"status","正在检索「"+queries.get(0)+"」等平台主题歌单");
+                        String context=tools.preparedThemeContext(queries);
+                        if(!lease.equals(activeOwners.get(owner)))return reactor.core.publisher.Flux.empty();
+                        if(tools.songs().isEmpty()) return reactor.core.publisher.Flux.just(tools.searchFailed()
+                                ? "本次主题歌单检索未能完成，请稍后重试。"
+                                : "本次没有从平台主题歌单中检索到相关候选，也没有用无关歌曲凑数。可以换个情绪或场景说法，或直接告诉我歌名、歌手。");
+                        send(emitter,"songs",tools.songs());
+                        send(emitter,"status","主题歌单检索完成");
+                        String response="主题歌单检索结果：按「"+String.join("」「",queries)+"」找到 "+tools.songs().size()
+                                +" 首真实候选，已列在下方。未标注“已验证完整”的条目为完整性未知，实际播放结果才是最终依据。";
+                        memory.add(conversation,java.util.List.of(new org.springframework.ai.chat.messages.UserMessage(dto.getQuery()),
+                                new org.springframework.ai.chat.messages.AssistantMessage(response+"\n候选："+context)));
+                        return reactor.core.publisher.Flux.just(response);
+                    }
                     if(queries.isEmpty() && RecommendationPlan.wantsDiscovery(dto.getQuery())) {
                         send(emitter,"status","正在检索平台热门歌曲");
                         String context=tools.preparedDiscoveryContext();
@@ -98,22 +113,6 @@ public class AgentController {
                                 : "本次热门榜单没有返回真实候选，请稍后重试或直接搜索具体歌名。");
                         send(emitter,"songs",tools.songs());
                         String response="热门歌曲检索结果：找到 "+tools.songs().size()+" 首真实候选，已列在下方。";
-                        memory.add(conversation,java.util.List.of(new org.springframework.ai.chat.messages.UserMessage(dto.getQuery()),
-                                new org.springframework.ai.chat.messages.AssistantMessage(response+"\n候选："+context)));
-                        return reactor.core.publisher.Flux.just(response);
-                    }
-                    if(!queries.isEmpty()) {
-                        send(emitter,"status","正在检索真实歌曲候选");
-                        String context=tools.preparedContext(queries);
-                        if(!lease.equals(activeOwners.get(owner)))return reactor.core.publisher.Flux.empty();
-                        if(tools.songs().isEmpty()) return reactor.core.publisher.Flux.just(tools.searchFailed()
-                                ? "本次歌曲检索未能完成。可以稍后重试，或在曲库中搜索具体歌名和歌手。"
-                                : "本次没有找到符合条件的原唱录音候选，因此没有用翻唱、混音或视频合集替代。你也可以告诉我具体歌手或歌名，再换个方向找。" );
-                        send(emitter,"songs",tools.songs());
-                        send(emitter,"status","曲库检索完成");
-                        // Catalog lookup is the complete operation here. Do not keep users
-                        // waiting for a local model to restate already available song cards.
-                        String response="曲库检索结果：找到 "+tools.songs().size()+" 首匹配的歌曲候选，已列在下方。已检查音频入口响应，完整播放情况仍以实际播放为准。";
                         memory.add(conversation,java.util.List.of(new org.springframework.ai.chat.messages.UserMessage(dto.getQuery()),
                                 new org.springframework.ai.chat.messages.AssistantMessage(response+"\n候选："+context)));
                         return reactor.core.publisher.Flux.just(response);
