@@ -349,7 +349,8 @@ const aggregateSearch = async (keyword, sources, limit, strict = true) => {
     return true
   })
   deduplicated.sort((left, right) => relevanceScore(right, keyword) - relevanceScore(left, keyword))
-  return { songs: deduplicated, failedSources }
+  // 合并各源后统一按总量截断，避免每个源各返回 limit 条导致总数成倍放大。
+  return { songs: deduplicated.slice(0, limit), failedSources }
 }
 
 const resolveResource = async (source, type, id, sizeOrBitrate) => {

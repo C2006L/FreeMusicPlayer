@@ -69,11 +69,10 @@ public class PlaylistServiceImpl extends ServiceImpl<PlaylistMapper, Playlist> i
     @Override
     @Cacheable(key = "#playlistDTO.pageNum + '-' + #playlistDTO.pageSize + '-' + #playlistDTO.title + '-' + #playlistDTO.style")
     public Result<PageResult<PlaylistVO>> getAllPlaylists(PlaylistDTO playlistDTO) {
-        // 分页查询
+        // 分页查询。歌单展示不依赖是否已有可播放绑定：
+        // 绑定为空或曲目暂不可播时，歌单本身仍应出现在列表中。
         Page<Playlist> page = new Page<>(playlistDTO.getPageNum(), playlistDTO.getPageSize());
-        QueryWrapper<Playlist> queryWrapper = new QueryWrapper<Playlist>()
-                .exists("SELECT 1 FROM tb_playlist_binding pb JOIN tb_song s ON s.id = pb.song_id " +
-                        "WHERE pb.playlist_id = tb_playlist.id AND s.media_status = 'active'");
+        QueryWrapper<Playlist> queryWrapper = new QueryWrapper<>();
         // 根据 playlistDTO 的条件构建查询条件
         if (playlistDTO.getTitle() != null) {
             queryWrapper.like("title", playlistDTO.getTitle());
