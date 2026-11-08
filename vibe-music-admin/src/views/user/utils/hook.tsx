@@ -344,7 +344,7 @@ export function useUser(tableRef: Ref) {
           password: row?.password ?? "",
           phone: row?.phone ?? "",
           email: row?.email ?? "",
-          userStatus: row?.userStatus ?? 1,
+          userStatus: row?.userStatus ?? 0,
           introduction: row?.introduction ?? ""
         }
       },

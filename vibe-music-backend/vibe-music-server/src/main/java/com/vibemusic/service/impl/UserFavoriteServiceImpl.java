@@ -101,6 +101,11 @@ public class UserFavoriteServiceImpl extends ServiceImpl<UserFavoriteMapper, Use
         Object userIdObj = map.get(JwtClaimsConstant.USER_ID);
         Long userId = TypeConversionUtil.toLong(userIdObj);
 
+        // 先做参数校验，避免不存在的 songId 触发外键异常并被兜底成 500。
+        if (songId == null || songMapper.selectById(songId) == null) {
+            throw new IllegalArgumentException("歌曲不存在或已下架，无法收藏");
+        }
+
         QueryWrapper<UserFavorite> queryWrapper = new QueryWrapper<>();
         queryWrapper.eq("user_id", userId).eq("type", 0).eq("song_id", songId);
         // 重复收藏是幂等操作：已存在时直接返回成功，避免前端重复点击拿到失败提示。

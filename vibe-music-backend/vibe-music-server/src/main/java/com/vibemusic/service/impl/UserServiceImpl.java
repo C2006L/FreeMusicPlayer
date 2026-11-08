@@ -540,12 +540,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
                 .setEmail(userAddDTO.getEmail()).setIntroduction(userAddDTO.getIntroduction())
                 .setCreateTime(LocalDateTime.now()).setUpdateTime(LocalDateTime.now());
 
-        // 前端传递的用户状态（1：启用，0：禁用）需反转
-        if (userAddDTO.getUserStatus().getId() == 1) {
-            user.setUserStatus(UserStatusEnum.ENABLE);  // 数据库（0：启用）
-        } else if (userAddDTO.getUserStatus().getId() == 0) {
-            user.setUserStatus(UserStatusEnum.DISABLE);    // 数据库（1：禁用）
-        }
+        // 状态直接使用枚举 id（0-启用，1-禁用），未传时默认启用，避免新建账号被误锁。
+        user.setUserStatus(userAddDTO.getUserStatus() == null ? UserStatusEnum.ENABLE : userAddDTO.getUserStatus());
 
         if (userMapper.insert(user) == 0) {
             return Result.error(MessageConstant.ADD + MessageConstant.FAILED);

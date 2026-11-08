@@ -9,6 +9,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 
 import java.sql.SQLIntegrityConstraintViolationException;
 import java.util.regex.Matcher;
@@ -76,6 +77,23 @@ public class GlobalExceptionHandler {
                 .reduce((msg1, msg2) -> msg1 + "; " + msg2)
                 .orElse("参数校验失败");
         return errorResult(errorMessage);
+    }
+
+    /**
+     * 处理请求体解析异常（如枚举值非法），属于客户端参数错误，返回 400 而不是 500。
+     *
+     * @param ex 解析异常
+     * @return
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Result handleHttpMessageNotReadableException(HttpMessageNotReadableException ex) {
+        Throwable cause = ex.getMostSpecificCause();
+        String message = cause instanceof IllegalArgumentException && cause.getMessage() != null
+                ? cause.getMessage()
+                : "请求参数格式错误";
+        log.warn("请求体解析失败：{}", message);
+        return errorResult(message);
     }
 
     /**
